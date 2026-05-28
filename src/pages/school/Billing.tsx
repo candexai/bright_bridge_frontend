@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Loader2, CreditCard, AlertCircle, CheckCircle, Check } from 'lucide-react';
 import api from '../../api/axios';
@@ -26,8 +26,32 @@ interface BillingStatus {
     maxMinutes: number;
     segments: TopupSegment[];
   };
+  minuteBreakdown?: {
+    includedPlanMinutes: number;
+    topupMinutesPurchased: number;
+    totalAvailable: number;
+  };
   /** From server: which PayPal Billing Plan IDs are set in .env */
   paypalPlansConfigured?: Record<string, boolean>;
+}
+
+interface CouponPreview {
+  couponApplied: boolean;
+  couponCode: string;
+  couponName: string;
+  originalAmountUsd: number;
+  discountAmountUsd: number;
+  finalAmountUsd: number;
+}
+interface PlanOption {
+  key: string;
+  name: string;
+  tagline: string;
+  price: number;
+  minutes: number;
+  bestFor: string;
+  features: string[];
+  tourBooking: string;
 }
 
 /** Matches server `topupPricing` segment rules (first N minutes per segment at centsPerMinute). */
@@ -166,6 +190,14 @@ export const SchoolBilling = () => {
   const [message, setMessage] = useState('');
   const [topupMinutes, setTopupMinutes] = useState(50);
   const [topupPreset, setTopupPreset] = useState<string>('50');
+  const [couponCode, setCouponCode] = useState('');
+  const [couponPreview, setCouponPreview] = useState<CouponPreview | null>(null);
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<PlanOption | null>(null);
+  const [planCouponCode, setPlanCouponCode] = useState('');
+  const [planCouponPreview, setPlanCouponPreview] = useState<CouponPreview | null>(null);
+  const [planCouponBusy, setPlanCouponBusy] = useState(false);
+  const checkoutRef = useRef<HTMLDivElement | null>(null);
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const returnUrl = `${baseUrl}/school/billing?sub=return`;
@@ -226,7 +258,11 @@ export const SchoolBilling = () => {
       setBusy(true);
       api
         .post('/billing/capture-order', { orderId })
-        .then(() => {
+        .then((res) => {
+          if (res.data?.subscriptionApprovalUrl) {
+            window.location.href = res.data.subscriptionApprovalUrl;
+            return;
+          }
           setMessage('Payment completed.');
           load();
         })
@@ -238,7 +274,7 @@ export const SchoolBilling = () => {
     }
   }, [searchParams, setSearchParams, load]);
 
-  const subscribe = async (planKey: string) => {
+  const subscribe = async (planKey: string, selectedCouponCode?: string) => {
     setBusy(true);
     setError('');
     try {
@@ -246,6 +282,7 @@ export const SchoolBilling = () => {
         planKey,
         returnUrl,
         cancelUrl,
+        couponCode: selectedCouponCode?.trim() || undefined,
       });
       if (res.data.approvalUrl) {
         window.location.href = res.data.approvalUrl;
@@ -256,6 +293,32 @@ export const SchoolBilling = () => {
       setError(getApiError(e, 'Subscribe failed. Check the server console and PayPal credentials.'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const applyPlanCoupon = async () => {
+    if (!selectedPlan) return;
+    const code = planCouponCode.trim();
+    if (!code) {
+      setPlanCouponPreview(null);
+      setError('Enter a coupon code first.');
+      return;
+    }
+    setPlanCouponBusy(true);
+    setError('');
+    try {
+      const res = await api.post('/billing/coupon/preview', {
+        orderType: 'subscription',
+        planKey: selectedPlan.key,
+        couponCode: code,
+      });
+      setPlanCouponPreview(res.data as CouponPreview);
+      setMessage(`Coupon ${res.data.couponCode} applied for ${selectedPlan.name}.`);
+    } catch (e: unknown) {
+      setPlanCouponPreview(null);
+      setError(getApiError(e, 'Invalid coupon for selected plan.'));
+    } finally {
+      setPlanCouponBusy(false);
     }
   };
 
@@ -271,6 +334,7 @@ export const SchoolBilling = () => {
         returnUrl,
         cancelUrl,
         minutes: clamped,
+        couponCode: couponCode.trim() || undefined,
       });
       if (res.data.approvalUrl) {
         window.location.href = res.data.approvalUrl;
@@ -281,6 +345,34 @@ export const SchoolBilling = () => {
       setError(getApiError(e, 'Top-up failed.'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const applyTopupCoupon = async () => {
+    const tp = status?.topupPricing;
+    if (!tp) return;
+    const code = couponCode.trim();
+    if (!code) {
+      setCouponPreview(null);
+      setError('Enter a coupon code first.');
+      return;
+    }
+    const clamped = Math.min(tp.maxMinutes, Math.max(tp.minMinutes, Math.floor(topupMinutes)));
+    setCouponBusy(true);
+    setError('');
+    try {
+      const res = await api.post('/billing/coupon/preview', {
+        orderType: 'topup',
+        minutes: clamped,
+        couponCode: code,
+      });
+      setCouponPreview(res.data as CouponPreview);
+      setMessage(`Coupon ${res.data.couponCode} applied.`);
+    } catch (e: unknown) {
+      setCouponPreview(null);
+      setError(getApiError(e, 'Invalid coupon.'));
+    } finally {
+      setCouponBusy(false);
     }
   };
 
@@ -380,6 +472,26 @@ export const SchoolBilling = () => {
             <div className="text-xs text-slate-500">minutes remaining</div>
           </div>
         </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">Included plan minutes</p>
+            <p className="text-base font-semibold text-slate-900 tabular-nums">
+              {status?.minuteBreakdown?.includedPlanMinutes ?? (status?.planDetails?.includedMinutesPerMonth || 0)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">Top-up minutes</p>
+            <p className="text-base font-semibold text-slate-900 tabular-nums">
+              {status?.minuteBreakdown?.topupMinutesPurchased ?? 0}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">Total available</p>
+            <p className="text-base font-semibold text-slate-900 tabular-nums">
+              {status?.minuteBreakdown?.totalAvailable ?? (typeof balance === 'number' ? balance : 0)}
+            </p>
+          </div>
+        </div>
 
         {active && low && (
           <div className="mt-4 p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm">
@@ -387,12 +499,17 @@ export const SchoolBilling = () => {
           </div>
         )}
 
-        {active && topupPricing && (
+        {topupPricing && (
           <div className="mt-6 pt-6 border-t border-slate-100 space-y-4">
             <h3 className="text-sm font-semibold text-slate-900">Buy more minutes</h3>
             <p className="text-xs text-slate-500">
               Choose how many minutes to add. Price uses stepped per-minute rates; the total below reflects your selection. Pay with PayPal; minutes are added after payment completes.
             </p>
+            {!active && (
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                Coupon entry is available now, but top-up payment is enabled only after your subscription becomes active.
+              </div>
+            )}
 
             <div>
               <label htmlFor="topup-preset" className="block text-xs font-medium text-slate-600 mb-1">
@@ -402,6 +519,7 @@ export const SchoolBilling = () => {
                 id="topup-preset"
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
                 value={topupPreset}
+                disabled={!active}
                 onChange={(e) => {
                   const v = e.target.value;
                   setTopupPreset(v);
@@ -434,10 +552,12 @@ export const SchoolBilling = () => {
                 min={topupPricing.minMinutes}
                 max={topupPricing.maxMinutes}
                 value={Math.min(topupPricing.maxMinutes, Math.max(topupPricing.minMinutes, topupMinutes))}
+                disabled={!active}
                 onChange={(e) => {
                   const n = parseInt(e.target.value, 10);
                   setTopupMinutes(n);
                   setTopupPreset(presetOptions.includes(n) ? String(n) : 'custom');
+                  setCouponPreview(null);
                 }}
                 className="w-full h-2 accent-blue-600 rounded-lg appearance-none bg-slate-200 cursor-pointer"
               />
@@ -447,11 +567,53 @@ export const SchoolBilling = () => {
               </div>
             </div>
 
+            <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] items-end">
+              <div>
+                <label htmlFor="topup-coupon" className="block text-xs font-medium text-slate-600 mb-1">
+                  Coupon code
+                </label>
+                <input
+                  id="topup-coupon"
+                  type="text"
+                  value={couponCode}
+                  disabled={!active}
+                  onChange={(e) => {
+                    setCouponCode(e.target.value.toUpperCase());
+                    setCouponPreview(null);
+                  }}
+                  placeholder="e.g. SUMMER20"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
+                />
+              </div>
+              <button type="button" onClick={applyTopupCoupon} disabled={!active || couponBusy || busy} className="ui-button-secondary h-10">
+                {couponBusy ? 'Checking...' : 'Apply coupon'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCouponCode('');
+                  setCouponPreview(null);
+                }}
+                disabled={!active || couponBusy || busy || (!couponCode && !couponPreview)}
+                className="ui-button-secondary h-10"
+              >
+                Clear
+              </button>
+            </div>
+
             <div className="rounded-lg bg-slate-50 border border-slate-100 px-4 py-3 space-y-2">
               <div className="flex justify-between items-baseline">
                 <span className="text-sm text-slate-600">Total due</span>
-                <span className="text-xl font-bold tabular-nums text-slate-900">${topupUsd.toFixed(2)}</span>
+                <span className="text-xl font-bold tabular-nums text-slate-900">
+                  ${(couponPreview?.finalAmountUsd ?? topupUsd).toFixed(2)}
+                </span>
               </div>
+              {couponPreview && couponPreview.couponApplied && (
+                <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-2 py-1">
+                  Coupon <strong>{couponPreview.couponCode}</strong> applied: -$
+                  {couponPreview.discountAmountUsd.toFixed(2)} (from ${couponPreview.originalAmountUsd.toFixed(2)})
+                </div>
+              )}
               {breakdown.length > 1 && (
                 <ul className="text-xs text-slate-500 space-y-0.5 border-t border-slate-200/80 pt-2 mt-1">
                   {breakdown.map((row) => (
@@ -467,8 +629,13 @@ export const SchoolBilling = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <button type="button" onClick={() => startTopup()} disabled={busy || topupUsd < 0.01} className="ui-button-primary">
-                Pay ${topupUsd.toFixed(2)} with PayPal
+              <button
+                type="button"
+                onClick={() => startTopup()}
+                disabled={!active || busy || (couponPreview?.finalAmountUsd ?? topupUsd) < 0.01}
+                className="ui-button-primary"
+              >
+                Pay ${(couponPreview?.finalAmountUsd ?? topupUsd).toFixed(2)} with PayPal
               </button>
               <span className="text-xs text-slate-500">One-time charge · minutes roll over</span>
             </div>
@@ -478,6 +645,67 @@ export const SchoolBilling = () => {
 
       <div>
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Plans (autopay monthly)</h2>
+        {selectedPlan && (
+          <div ref={checkoutRef} className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Checkout</p>
+                <p className="text-xs text-slate-600">
+                  Selected plan: <strong>{selectedPlan.name}</strong> (${selectedPlan.price}/month)
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ui-button-secondary"
+                onClick={() => {
+                  setSelectedPlan(null);
+                  setPlanCouponCode('');
+                  setPlanCouponPreview(null);
+                }}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="w-full max-w-sm">
+                <label className="block text-xs font-medium text-slate-600 mb-1">Coupon code (optional)</label>
+                <input
+                  type="text"
+                  value={planCouponCode}
+                  onChange={(e) => {
+                    setPlanCouponCode(e.target.value.toUpperCase());
+                    setPlanCouponPreview(null);
+                  }}
+                  placeholder="e.g. TEST20"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
+                />
+              </div>
+              <button type="button" onClick={applyPlanCoupon} disabled={planCouponBusy || busy} className="ui-button-secondary h-10">
+                {planCouponBusy ? 'Checking...' : 'Apply coupon'}
+              </button>
+              <button
+                type="button"
+                onClick={() => subscribe(selectedPlan.key, planCouponCode)}
+                disabled={busy}
+                className="ui-button-primary h-10"
+              >
+                Pay & Subscribe
+              </button>
+            </div>
+            <div className="text-xs text-slate-700">
+              {planCouponPreview?.couponApplied ? (
+                <span className="text-emerald-700">
+                  Coupon <strong>{planCouponPreview.couponCode}</strong> accepted for this plan. Discounted amount is handled by your configured discounted PayPal plan.
+                </span>
+              ) : (
+                <span>
+                  Monthly price: <strong>${selectedPlan.price.toFixed(2)}</strong>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         <div className="grid gap-6 2xl:grid-cols-4 xl:grid-cols-3 lg:grid-cols-2 md:grid-cols-2 sm:grid-cols-1 items-stretch">
           {PLANS.map((p) => {
             const isSubscribed = status?.subscriptionPlanKey === p.key && status?.subscriptionStatus === 'active';
@@ -539,10 +767,18 @@ export const SchoolBilling = () => {
                     <button
                       type="button"
                       disabled={busy || (cfg && cfg[p.key] === false)}
-                      onClick={() => subscribe(p.key)}
+                      onClick={() => {
+                        setSelectedPlan(p);
+                        setPlanCouponCode('');
+                        setPlanCouponPreview(null);
+                        setMessage(`${p.name} selected. Complete checkout above the plans.`);
+                        setTimeout(() => {
+                          checkoutRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 0);
+                      }}
                       className={`w-full py-3 rounded-lg text-base font-semibold hover:opacity-90 disabled:opacity-50 ${isMostPopular ? 'bg-blue-500 text-white' : 'bg-slate-900 text-white'}`}
                     >
-                      Subscribe with PayPal
+                      {selectedPlan?.key === p.key ? 'Selected' : 'Choose plan'}
                     </button>
                   )}
                   {cfg && cfg[p.key] === false && (

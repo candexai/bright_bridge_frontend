@@ -8,6 +8,8 @@ import {
   X,
   CheckCircle,
   RotateCcw,
+  Trash2,
+  ChevronDown,
 } from 'lucide-react';
 
 type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
@@ -71,6 +73,35 @@ export const AdminNotifications = () => {
 
   const [selected, setSelected] = useState<AlertRow | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
+
+  const bulkDeleteLabels: Record<string, string> = {
+    resolved: 'Delete all resolved notifications',
+    acknowledged: 'Delete all acknowledged notifications',
+    all: 'Delete all notifications',
+  };
+
+  const handleBulkDelete = async (scope: 'all' | 'resolved' | 'acknowledged') => {
+    const label = bulkDeleteLabels[scope];
+    if (!confirm(`${label}? This cannot be undone.`)) return;
+
+    setBulkMenuOpen(false);
+    setProcessing(`bulk-${scope}`);
+    setError('');
+    try {
+      const res = await api.delete('/admin/alerts/bulk', { data: { scope } });
+      setSuccess(`Deleted ${res.data.deletedCount} notification(s)`);
+      setTimeout(() => setSuccess(''), 3000);
+      setSelected(null);
+      setPage(1);
+      await fetchAlerts();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error || 'Failed to delete notifications');
+    } finally {
+      setProcessing(null);
+    }
+  };
 
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
@@ -144,6 +175,56 @@ export const AdminNotifications = () => {
           <p className="text-sm text-slate-500 mt-0.5">
             System alerts and integration failures across all schools
           </p>
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            disabled={!!processing?.startsWith('bulk-')}
+            onClick={() => setBulkMenuOpen((o) => !o)}
+            className="ui-button-secondary text-sm flex items-center gap-2 py-2 px-3"
+          >
+            {processing?.startsWith('bulk-') ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            Delete
+            <ChevronDown className="w-4 h-4" />
+          </button>
+          {bulkMenuOpen && (
+            <>
+              <button
+                type="button"
+                className="fixed inset-0 z-10"
+                aria-label="Close menu"
+                onClick={() => setBulkMenuOpen(false)}
+              />
+              <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+                <button
+                  type="button"
+                  onClick={() => handleBulkDelete('resolved')}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Delete resolved
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBulkDelete('acknowledged')}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Delete acknowledged
+                </button>
+                <div className="border-t border-slate-100 my-1" />
+                <button
+                  type="button"
+                  onClick={() => handleBulkDelete('all')}
+                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                >
+                  Delete all
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

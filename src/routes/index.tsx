@@ -33,6 +33,7 @@ import { PrivacyPolicy } from '../pages/PrivacyPolicy';
 import { TermsOfService } from '../pages/TermsOfService';
 import { SchoolBilling } from '../pages/school/Billing';
 import { AdminFinancials } from '../pages/admin/Financials';
+import { AdminNotifications } from '../pages/admin/Notifications';
 
 const RootRedirect = () => {
   const { isAuthenticated, user } = useAuthStore();
@@ -217,6 +218,15 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
         children: [{ index: true, element: <AdminFinancials /> }],
+      },
+      {
+        path: 'notifications',
+        element: (
+          <ProtectedRoute requiredRole="admin">
+            <AdminLayout />
+          </ProtectedRoute>
+        ),
+        children: [{ index: true, element: <AdminNotifications /> }],
       },
     ],
   },

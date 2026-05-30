@@ -98,7 +98,7 @@ export const AdminDashboard = () => {
 
       const [dashboardRes, schoolsRes] = await Promise.all([
         api.get('/admin/dashboard', { params }),
-        api.get('/admin/schools')
+        api.get('/admin/schools'),
       ]);
       setData(dashboardRes.data);
       setSchoolsInfo(schoolsRes.data);

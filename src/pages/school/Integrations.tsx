@@ -42,6 +42,15 @@ export const SchoolIntegrations = () => {
     if (params.get('success')) {
       alert(`Successfully connected ${params.get('success')}!`);
       window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (params.get('error')) {
+      const provider = params.get('error');
+      const detail = params.get('detail');
+      alert(
+        detail
+          ? `Failed to connect ${provider}: ${detail}`
+          : `Failed to connect ${provider}. Check server logs or Admin → Notifications.`
+      );
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
 

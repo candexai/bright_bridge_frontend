@@ -6,6 +6,7 @@ import {
   Check, X
 } from 'lucide-react';
 import api from '../../api/axios';
+import { formatCallTimestamp } from '../../utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface NeedsAttentionCall {
@@ -650,12 +651,16 @@ export const DailyInsights = () => {
                           )}
                           
                           {/* Duration and time */}
-                          <div className="flex items-center gap-4 text-xs text-slate-400">
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {new Date(call.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <div className="flex items-center gap-4 text-xs text-slate-500">
+                            <span className="flex items-center gap-1.5">
+                              <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="font-medium text-slate-600 tabular-nums">
+                                {formatCallTimestamp(call.timestamp)}
+                              </span>
                             </span>
-                            <span>{Math.floor(call.duration / 60)}m {call.duration % 60}s</span>
+                            <span className="text-slate-400 tabular-nums">
+                              {Math.floor(call.duration / 60)}m {call.duration % 60}s
+                            </span>
                           </div>
                         </div>
                         

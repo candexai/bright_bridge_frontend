@@ -26,7 +26,12 @@ interface NeedsAttentionCall {
   childAge?: string;
   language?: string;
   missingDetails?: string[];
+  isHotLead?: boolean;
+  parentSegment?: 'new_parent' | 'current_family';
+  aiProcessed?: boolean;
 }
+
+type InquiryTab = 'all' | 'hot_leads';
 
 interface TodayTour {
   id: string;
@@ -157,6 +162,7 @@ export const DailyInsights = () => {
   const [todaysTours, setTodaysTours] = useState<TodayTour[]>([]);
   const [todayCalls, setTodayCalls] = useState<{ id: string; timestamp: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [inquiryTab, setInquiryTab] = useState<InquiryTab>('all');
   const [expandedCall, setExpandedCall] = useState<string | null>(null);
   const [, setNow] = useState(Date.now());
   const [feedbackInputs, setFeedbackInputs] = useState<Record<string, string>>({});
@@ -307,14 +313,9 @@ export const DailyInsights = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        // Load both endpoints in parallel to reduce total load time
-        const [actionRes, res] = await Promise.all([
-          api.get('/school/action-needed'),
-          api.get('/school/daily-insights')
-        ]);
-        setNeedsAttention(actionRes.data.actionNeeded || []);
-        const apiTours: TodayTour[] = res.data.todaysTours || [];
-        setTodaysTours(apiTours);
+        const res = await api.get('/school/daily-insights');
+        setNeedsAttention(res.data.actionNeeded || []);
+        setTodaysTours(res.data.todaysTours || []);
         setTodayCalls(res.data.todayCalls || []);
       } catch (err) {
         console.error('Failed to load daily insights:', err);
@@ -383,6 +384,16 @@ export const DailyInsights = () => {
     setCloseConfirm(null);
   };
 
+  const hotLeads = useMemo(
+    () => needsAttention.filter((call) => call.isHotLead),
+    [needsAttention]
+  );
+
+  const displayedInquiries = useMemo(
+    () => (inquiryTab === 'hot_leads' ? hotLeads : needsAttention),
+    [inquiryTab, hotLeads, needsAttention]
+  );
+
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   // Calculate call timing buckets from actual todayCalls data
@@ -439,12 +450,19 @@ export const DailyInsights = () => {
       </div>
 
       {/* Top Row Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
         {/* CALLS TODAY */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">CALLS TODAY</div>
           <div className="text-2xl font-bold text-slate-900 tabular-nums">{todayCalls.length}</div>
           <div className="text-xs text-slate-500 mt-1">Since midnight</div>
+        </div>
+
+        {/* HOT LEADS */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">HOT LEADS</div>
+          <div className="text-2xl font-bold text-amber-600 tabular-nums">{hotLeads.length}</div>
+          <div className="text-xs text-slate-500 mt-1">High-intent follow-ups</div>
         </div>
 
         {/* ACTION NEEDED */}
@@ -480,25 +498,62 @@ export const DailyInsights = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Inquiries Needing Attention */}
         <div className="lg:col-span-2">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertTriangle className="w-4 h-4 text-red-500" />
-            <h2 className="text-base font-bold text-slate-900">INQUIRIES NEEDING ATTENTION</h2>
-            {needsAttention.length > 0 && (
-              <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold border border-red-200">
-                {needsAttention.length}
-              </span>
-            )}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-500" />
+              <h2 className="text-base font-bold text-slate-900">INQUIRIES NEEDING ATTENTION</h2>
+              {needsAttention.length > 0 && (
+                <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold border border-red-200">
+                  {needsAttention.length}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setInquiryTab('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  inquiryTab === 'all'
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                All Inquiries
+              </button>
+              <button
+                type="button"
+                onClick={() => setInquiryTab('hot_leads')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  inquiryTab === 'hot_leads'
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                }`}
+              >
+                Hot Leads
+                {hotLeads.length > 0 && (
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-white/20 text-[10px]">
+                    {hotLeads.length}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
 
-          {needsAttention.length === 0 ? (
+          {displayedInquiries.length === 0 ? (
             <div className="bg-white border border-slate-200 rounded-xl p-10 text-center shadow-sm">
               <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
-              <p className="text-slate-700 font-semibold">All clear!</p>
-              <p className="text-slate-400 text-sm mt-1">No action-needed inquiries from the last 30 days.</p>
+              <p className="text-slate-700 font-semibold">
+                {inquiryTab === 'hot_leads' ? 'No hot leads right now' : 'All clear!'}
+              </p>
+              <p className="text-slate-400 text-sm mt-1">
+                {inquiryTab === 'hot_leads'
+                  ? 'High-intent inquiries will appear here when detected.'
+                  : 'No action-needed inquiries from the last 30 days.'}
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {needsAttention.map((call) => {
+              {displayedInquiries.map((call) => {
                 // Get initials from caller name
                 const initials = call.callerName
                   .split(' ')
@@ -528,6 +583,21 @@ export const DailyInsights = () => {
                             {call.callerPhone && (
                               <span className="text-xs text-slate-500">{call.callerPhone}</span>
                             )}
+                            {call.parentSegment === 'current_family' && (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold border bg-violet-100 text-violet-700 border-violet-200">
+                                Current Family
+                              </span>
+                            )}
+                            {call.parentSegment === 'new_parent' && (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold border bg-slate-100 text-slate-600 border-slate-200">
+                                New Parent
+                              </span>
+                            )}
+                            {call.isHotLead && (
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold border bg-amber-100 text-amber-700 border-amber-200">
+                                Hot Lead
+                              </span>
+                            )}
                           </div>
                           
                           {/* Tags */}
@@ -537,8 +607,12 @@ export const DailyInsights = () => {
                                 <span
                                   key={idx}
                                   className={`px-2 py-0.5 rounded-full text-[9px] font-medium border ${
-                                    tag.toLowerCase().includes('hot lead') 
-                                      ? 'bg-amber-100 text-amber-700 border-amber-200' 
+                                    tag.toLowerCase().includes('hot lead')
+                                      ? 'bg-amber-100 text-amber-700 border-amber-200'
+                                      : tag.toLowerCase().includes('current family')
+                                      ? 'bg-violet-100 text-violet-700 border-violet-200'
+                                      : tag.toLowerCase().includes('new parent')
+                                      ? 'bg-slate-100 text-slate-600 border-slate-200'
                                       : tag.toLowerCase().includes('partial call')
                                       ? 'bg-orange-100 text-orange-700 border-orange-200'
                                       : tag.toLowerCase().includes('urgency')
@@ -812,6 +886,16 @@ export const DailyInsights = () => {
               <h3 className="text-sm font-bold text-slate-900">QUICK ACTIONS</h3>
             </div>
             <div className="space-y-2">
+              {hotLeads.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setInquiryTab('hot_leads')}
+                  className="w-full text-left text-xs text-slate-700 hover:text-amber-700 hover:bg-amber-50 px-3 py-2 rounded-lg transition-colors"
+                >
+                  Review {hotLeads.length} hot lead{hotLeads.length === 1 ? '' : 's'}
+                </button>
+              )}
+
               {/* Follow up with most recent action-needed call */}
               {needsAttention.length > 0 && (
                 <button className="w-full text-left text-xs text-slate-700 hover:text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg transition-colors">

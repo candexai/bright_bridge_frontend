@@ -89,24 +89,15 @@ export const SchoolSettings = () => {
   // ── Load settings on mount ──────────────────────────────────────────────
   useEffect(() => {
     api.get('/school/settings')
-      .then(async res => {
+      .then(res => {
         const data = res.data;
-        let qaPairs = cleanQAPairs(data.qaPairs);
-
-        // First-time setup: seed default Q&A to DB for this school
-        if (qaPairs.length === 0) {
-          qaPairs = DEFAULT_QA_PAIRS;
-          try {
-            await api.put('/school/settings', { qaPairs: DEFAULT_QA_PAIRS });
-            console.log('[Settings] Default Q&A pairs seeded to DB for this school.');
-          } catch (err) {
-            console.error('[Settings] Failed to seed default Q&A pairs:', err);
-          }
-        }
+        const qaPairs = cleanQAPairs(data.qaPairs);
+        const loadedQaPairs = qaPairs.length > 0 ? qaPairs : DEFAULT_QA_PAIRS;
 
         setSettings({
           ...data,
-          qaPairs,
+          adminEmail: (data.adminEmail || '').trim(),
+          qaPairs: loadedQaPairs,
           enableHumanTransfer: Boolean(data.enableHumanTransfer),
           humanTransferCondition: data.humanTransferCondition || '',
           humanTransferPhoneNumber: data.humanTransferPhoneNumber || '',
@@ -148,7 +139,7 @@ export const SchoolSettings = () => {
       preferredCalendar: settings.preferredCalendar,
       preferredEmailProvider: settings.preferredEmailProvider,
       timezone: settings.timezone,
-      adminEmail: settings.adminEmail,
+      adminEmail: (settings.adminEmail || '').trim(),
       enableHumanTransfer: settings.enableHumanTransfer,
       humanTransferCondition: settings.humanTransferCondition,
       humanTransferPhoneNumber: settings.humanTransferPhoneNumber,
@@ -159,6 +150,8 @@ export const SchoolSettings = () => {
     try {
       const res = await api.put('/school/settings', payload);
       console.log('[Settings] Saved successfully:', res.data);
+      const savedAdminEmail = (res.data?.adminEmail || payload.adminEmail || '').trim();
+      setSettings(prev => prev ? { ...prev, adminEmail: savedAdminEmail } : prev);
       setStatus({ type: 'success', message: `Settings saved — ${res.data.qaPairsCount ?? 0} Q&A pairs stored.` });
     } catch (err: any) {
       console.error('[Settings] Save failed:', err);
@@ -783,6 +776,8 @@ export const SchoolSettings = () => {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Admin Notification Email</label>
                 <input
                   type="email"
+                  name="school-admin-notification-email"
+                  autoComplete="off"
                   value={settings.adminEmail || ''}
                   onChange={e => update('adminEmail', e.target.value)}
                   className="ui-input w-full"

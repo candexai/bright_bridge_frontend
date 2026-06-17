@@ -604,7 +604,15 @@ export const DailyInsights = () => {
                           {/* Tags */}
                           {call.tags && call.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1.5 mb-2">
-                              {call.tags.map((tag, idx) => (
+                              {call.tags
+                                .filter((tag) => {
+                                  const lower = tag.toLowerCase();
+                                  if (call.isHotLead && lower.includes('hot lead')) return false;
+                                  if (call.parentSegment === 'current_family' && lower.includes('current family')) return false;
+                                  if (call.parentSegment === 'new_parent' && lower.includes('new parent')) return false;
+                                  return true;
+                                })
+                                .map((tag, idx) => (
                                 <span
                                   key={idx}
                                   className={`px-2 py-0.5 rounded-full text-[9px] font-medium border ${

@@ -478,15 +478,17 @@ export const SchoolDashboard = () => {
                               </p>
                               <AudioPlayer src={call.recordingUrl} />
                             </div>
-                            {call.summary && (
-                              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                                <p className="text-[10px] font-bold text-slate-900 mb-4 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
-                                  <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-                                  AI Generated Insights
-                                </p>
-                                <p className="text-sm text-slate-600 leading-relaxed italic font-medium">"{call.summary}"</p>
-                              </div>
-                            )}
+                            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                              <p className="text-[10px] font-bold text-slate-900 mb-4 uppercase tracking-widest border-b border-slate-100 pb-2 flex items-center gap-2">
+                                <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                                AI Generated Insights
+                              </p>
+                              <p className="text-sm text-slate-600 leading-relaxed italic font-medium">
+                                {call.summary
+                                  ? `"${call.summary}"`
+                                  : 'Summary is not available yet for this call. Please refresh shortly or check Call Logs for the full transcript.'}
+                              </p>
+                            </div>
                           </div>
                         </td>
                       </tr>

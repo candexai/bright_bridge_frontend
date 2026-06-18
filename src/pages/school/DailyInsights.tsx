@@ -1,12 +1,22 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Loader2, AlertTriangle, Calendar, Clock,
-  Star, ChevronDown, ChevronUp, Play, Pause,
-  Headphones, Download, CheckCircle2,
+  Star, ChevronDown, ChevronUp,
+  Headphones, CheckCircle2,
   Check, X
 } from 'lucide-react';
 import api from '../../api/axios';
 import { formatCallTimestamp } from '../../utils';
+import { SeekableAudioPlayer } from '../../components/SeekableAudioPlayer';
+import {
+  type ParentSegment,
+  getSegmentLabel,
+  getSegmentFilterButtonClassName,
+  getSegmentTagClassName,
+  getTourEmailMissingBadgeClassName,
+  getTourBookedBadgeClassName,
+} from '../../utils/parentSegment';
+import { filterTourCardQuestions, filterTourCardTalkingPoints } from '../../utils/tourCardQuestions';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface NeedsAttentionCall {
@@ -28,11 +38,55 @@ interface NeedsAttentionCall {
   language?: string;
   missingDetails?: string[];
   isHotLead?: boolean;
-  parentSegment?: 'new_parent' | 'current_family';
+  parentSegment?: ParentSegment;
   aiProcessed?: boolean;
 }
 
 type InquiryTab = 'all' | 'hot_leads';
+
+function dedupeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const tag of tags) {
+    const label = String(tag || '').trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
+}
+
+function getCallDisplayTags(call: NeedsAttentionCall): string[] {
+  const raw: string[] = [];
+  if (call.isHotLead) raw.push('Hot Lead');
+  if (call.parentSegment === 'current_family') raw.push('Current Family');
+  else if (call.parentSegment === 'unknown') raw.push('Unknown');
+  else if (call.parentSegment === 'new_parent') raw.push('New Parent');
+  for (const tag of call.tags || []) {
+    const lower = tag.toLowerCase();
+    if (lower === 'current family' || lower === 'new parent' || lower === 'unknown') continue;
+    raw.push(tag);
+  }
+  return dedupeTags(raw);
+}
+
+function getTagClassName(tag: string): string {
+  const segmentClass = getSegmentTagClassName(tag);
+  if (segmentClass) return segmentClass;
+  const lower = tag.toLowerCase();
+  if (lower.includes('hot lead')) {
+    return 'bg-amber-50 text-amber-800 border-amber-200';
+  }
+  if (lower.includes('email missing')) {
+    return getTourEmailMissingBadgeClassName();
+  }
+  if (lower === 'tour booked' || (lower.includes('tour booked') && !lower.includes('email'))) {
+    return getTourBookedBadgeClassName();
+  }
+  return 'bg-slate-50 text-slate-600 border-slate-200';
+}
 
 interface TodayTour {
   id: string;
@@ -45,6 +99,7 @@ interface TodayTour {
   scheduledAt: string;
   calendarProvider: string | null;
   questionsAsked: string[];
+  tourTalkingPoints?: string[];
   highlights: string;
   callSummary: string;
   reminderSent: boolean;
@@ -53,110 +108,6 @@ interface TodayTour {
   tourScript?: string[];
 }
 
-// ─── Mini Audio Player ────────────────────────────────────────────────────────
-const MiniPlayer = ({ src }: { src: string }) => {
-  const [playing, setPlaying] = useState(false);
-  const [time, setTime] = useState(0);
-  const [dur, setDur] = useState(0);
-  const [err, setErr] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const ref = useRef<HTMLAudioElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
-  const scrubbingRef = useRef(false);
-
-  const toggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!ref.current || err) return;
-    playing ? ref.current.pause() : ref.current.play();
-    setPlaying(!playing);
-  };
-
-  const fmt = (t: number) => {
-    if (isNaN(t)) return '0:00';
-    return `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
-  };
-
-  const pct = dur > 0 ? (time / dur) * 100 : 0;
-  const seekToClientX = (clientX: number) => {
-    if (!ref.current || !barRef.current || err) return;
-    const r = barRef.current.getBoundingClientRect();
-    ref.current.currentTime = ((clientX - r.left) / (r.width || 1)) * dur;
-  };
-
-  return (
-    <div className={`flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 ${err ? 'opacity-60' : ''}`}>
-      <audio
-        ref={ref} src={src} hidden
-        onTimeUpdate={() => ref.current && setTime(ref.current.currentTime)}
-        onLoadedMetadata={() => { if (ref.current) { setDur(ref.current.duration); setLoading(false); } }}
-        onCanPlay={() => setLoading(false)}
-        onError={() => { setErr(true); setLoading(false); }}
-        onEnded={() => setPlaying(false)}
-      />
-      <button
-        onClick={toggle}
-        disabled={err || loading}
-        className={`w-7 h-7 flex items-center justify-center rounded-md shrink-0 transition-all ${err ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-      >
-        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : playing ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current ml-0.5" />}
-      </button>
-      <div className="flex-1 min-w-0">
-        {err ? (
-          <p className="text-[10px] text-red-500 italic font-medium">Recording unavailable</p>
-        ) : (
-          <>
-            <div
-              ref={barRef}
-              className="h-1 bg-slate-200 rounded-full cursor-pointer relative touch-none"
-              role="slider"
-              aria-label="Seek audio"
-              aria-valuemin={0}
-              aria-valuemax={Math.max(0, Math.floor(dur))}
-              aria-valuenow={Math.max(0, Math.floor(time))}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                if (err || loading) return;
-                scrubbingRef.current = true;
-                e.currentTarget.setPointerCapture(e.pointerId);
-                seekToClientX(e.clientX);
-              }}
-              onPointerMove={(e) => {
-                if (!scrubbingRef.current) return;
-                e.stopPropagation();
-                seekToClientX(e.clientX);
-              }}
-              onPointerUp={(e) => {
-                if (!scrubbingRef.current) return;
-                e.stopPropagation();
-                scrubbingRef.current = false;
-                try {
-                  e.currentTarget.releasePointerCapture(e.pointerId);
-                } catch {
-                  // ignore
-                }
-              }}
-            >
-              <div className="absolute inset-y-0 left-0 bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
-            </div>
-            <div className="flex justify-between mt-0.5">
-              <span className="text-[9px] font-bold text-slate-400">{fmt(time)}</span>
-              <span className="text-[9px] font-bold text-slate-400">{fmt(dur)}</span>
-            </div>
-          </>
-        )}
-      </div>
-      <div className="flex items-center gap-1.5 text-slate-300 shrink-0">
-        <Headphones className="w-3 h-3" />
-        {!err && !loading && (
-          <a href={src} download onClick={e => e.stopPropagation()} className="hover:text-blue-500 transition-colors">
-            <Download className="w-3 h-3" />
-          </a>
-        )}
-      </div>
-    </div>
-  );
-};
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 export const DailyInsights = () => {
   const [needsAttention, setNeedsAttention] = useState<NeedsAttentionCall[]>([]);
@@ -164,6 +115,7 @@ export const DailyInsights = () => {
   const [todayCalls, setTodayCalls] = useState<{ id: string; timestamp: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [inquiryTab, setInquiryTab] = useState<InquiryTab>('all');
+  const [segmentFilter, setSegmentFilter] = useState<ParentSegment>('new_parent');
   const [expandedCall, setExpandedCall] = useState<string | null>(null);
   const [, setNow] = useState(Date.now());
   const [feedbackInputs, setFeedbackInputs] = useState<Record<string, string>>({});
@@ -171,13 +123,8 @@ export const DailyInsights = () => {
   const [closeConfirm, setCloseConfirm] = useState<string | null>(null);
 
   const handlePrintTourCard = (tour: TodayTour) => {
-    const askedAbout = (tour.questionsAsked || []).filter(Boolean);
-    const talkingPoints = [tour.highlights, ...(tour.tourScript || []), tour.callSummary]
-      .filter(Boolean)
-      .join('\n')
-      .split(/\n+/)
-      .map(s => s.trim())
-      .filter(Boolean);
+    const askedAbout = filterTourCardQuestions(tour.questionsAsked || []);
+    const talkingPoints = filterTourCardTalkingPoints(tour.tourTalkingPoints || []);
     const html = `
       <!doctype html>
       <html>
@@ -257,11 +204,11 @@ export const DailyInsights = () => {
             <div class="col">
               <div class="row">
                 <div class="k">What They Asked About</div>
-                <ul class="q-list">${(askedAbout.length ? askedAbout : ['No questions captured']).map(q => `<li>${q}</li>`).join('')}</ul>
+                <ul class="q-list">${askedAbout.map(q => `<li>${q}</li>`).join('')}</ul>
               </div>
               <div class="row talking">
                 <div class="k">Tour Talking Points For Staff</div>
-                ${(talkingPoints.length ? talkingPoints : ['Share tour highlights and next enrollment steps']).map(p => `<div class="item">${p}</div>`).join('')}
+                ${talkingPoints.map(p => `<div class="item">${p}</div>`).join('')}
               </div>
             </div>
           </div>
@@ -390,10 +337,12 @@ export const DailyInsights = () => {
     [needsAttention]
   );
 
-  const displayedInquiries = useMemo(
-    () => (inquiryTab === 'hot_leads' ? hotLeads : needsAttention),
-    [inquiryTab, hotLeads, needsAttention]
-  );
+  const displayedInquiries = useMemo(() => {
+    if (inquiryTab === 'hot_leads') {
+      return hotLeads;
+    }
+    return needsAttention.filter((call) => (call.parentSegment || 'new_parent') === segmentFilter);
+  }, [inquiryTab, hotLeads, needsAttention, segmentFilter]);
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -501,33 +450,37 @@ export const DailyInsights = () => {
         <div className="lg:col-span-2">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-500" />
+              <AlertTriangle className="w-4 h-4 text-slate-500" />
               <h2 className="text-base font-bold text-slate-900">INQUIRIES NEEDING ATTENTION</h2>
               {needsAttention.length > 0 && (
-                <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold border border-red-200">
+                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-[10px] font-bold border border-slate-200">
                   {needsAttention.length}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                {(['new_parent', 'current_family', 'unknown'] as ParentSegment[]).map((segment) => (
+                  <button
+                    key={segment}
+                    type="button"
+                    onClick={() => {
+                      setSegmentFilter(segment);
+                      setInquiryTab('all');
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${getSegmentFilterButtonClassName(segment, segmentFilter === segment && inquiryTab !== 'hot_leads')}`}
+                  >
+                    {getSegmentLabel(segment)}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
-                onClick={() => setInquiryTab('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  inquiryTab === 'all'
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                All Inquiries
-              </button>
-              <button
-                type="button"
-                onClick={() => setInquiryTab('hot_leads')}
+                onClick={() => setInquiryTab(inquiryTab === 'hot_leads' ? 'all' : 'hot_leads')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                   inquiryTab === 'hot_leads'
-                    ? 'bg-amber-500 text-white'
-                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
                 Hot Leads
@@ -548,13 +501,14 @@ export const DailyInsights = () => {
               </p>
               <p className="text-slate-400 text-sm mt-1">
                 {inquiryTab === 'hot_leads'
-                  ? 'High-intent inquiries will appear here when detected.'
-                  : 'No action-needed inquiries from the last 30 days.'}
+                  ? 'High-intent follow-ups from all inquiry types will appear here.'
+                  : `No ${getSegmentLabel(segmentFilter).toLowerCase()} inquiries from the last 30 days.`}
               </p>
             </div>
           ) : (
             <div className="space-y-3">
               {displayedInquiries.map((call) => {
+                const displayTags = getCallDisplayTags(call);
                 // Get initials from caller name
                 const initials = call.callerName
                   .split(' ')
@@ -566,70 +520,33 @@ export const DailyInsights = () => {
                 return (
                   <div
                     key={call.id}
-                    className="bg-white border border-red-100 rounded-xl shadow-sm overflow-hidden transition-all hover:shadow-md"
+                    className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden transition-all hover:shadow-md"
                   >
                     {/* Call row */}
                     <div className="px-5 py-4">
                       <div className="flex items-start gap-4">
                         {/* Initials avatar */}
-                        <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center shrink-0">
-                          <span className="text-sm font-bold text-blue-700">{initials}</span>
+                        <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center shrink-0">
+                          <span className="text-sm font-bold text-slate-600">{initials}</span>
                         </div>
                         
                         {/* Main content */}
                         <div className="flex-1 min-w-0">
                           {/* Name and phone */}
-                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                          <div className="flex items-center gap-2 flex-wrap mb-1.5">
                             <span className="text-sm font-bold text-slate-900">{call.callerName}</span>
                             {call.callerPhone && (
                               <span className="text-xs text-slate-500">{call.callerPhone}</span>
                             )}
-                            {call.parentSegment === 'current_family' && (
-                              <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold border bg-violet-100 text-violet-700 border-violet-200">
-                                Current Family
-                              </span>
-                            )}
-                            {call.parentSegment === 'new_parent' && (
-                              <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold border bg-slate-100 text-slate-600 border-slate-200">
-                                New Parent
-                              </span>
-                            )}
-                            {call.isHotLead && (
-                              <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold border bg-amber-100 text-amber-700 border-amber-200">
-                                Hot Lead
-                              </span>
-                            )}
                           </div>
                           
-                          {/* Tags */}
-                          {call.tags && call.tags.length > 0 && (
+                          {/* Tags — single deduplicated row */}
+                          {displayTags.length > 0 && (
                             <div className="flex flex-wrap gap-1.5 mb-2">
-                              {call.tags
-                                .filter((tag) => {
-                                  const lower = tag.toLowerCase();
-                                  if (call.isHotLead && lower.includes('hot lead')) return false;
-                                  if (call.parentSegment === 'current_family' && lower.includes('current family')) return false;
-                                  if (call.parentSegment === 'new_parent' && lower.includes('new parent')) return false;
-                                  return true;
-                                })
-                                .map((tag, idx) => (
+                              {displayTags.map((tag, idx) => (
                                 <span
                                   key={idx}
-                                  className={`px-2 py-0.5 rounded-full text-[9px] font-medium border ${
-                                    tag.toLowerCase().includes('hot lead')
-                                      ? 'bg-amber-100 text-amber-700 border-amber-200'
-                                      : tag.toLowerCase().includes('current family')
-                                      ? 'bg-violet-100 text-violet-700 border-violet-200'
-                                      : tag.toLowerCase().includes('new parent')
-                                      ? 'bg-slate-100 text-slate-600 border-slate-200'
-                                      : tag.toLowerCase().includes('partial call')
-                                      ? 'bg-orange-100 text-orange-700 border-orange-200'
-                                      : tag.toLowerCase().includes('urgency')
-                                      ? 'bg-red-100 text-red-700 border-red-200'
-                                      : tag.toLowerCase().includes('no child info')
-                                      ? 'bg-purple-100 text-purple-700 border-purple-200'
-                                      : 'bg-blue-100 text-blue-700 border-blue-200'
-                                  }`}
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-medium border ${getTagClassName(tag)}`}
                                 >
                                   {tag}
                                 </span>
@@ -653,7 +570,7 @@ export const DailyInsights = () => {
                           </div>
                           
                           {call.missingDetails && call.missingDetails.length > 0 && (
-                            <div className="text-xs text-amber-600 mb-2">
+                            <div className="text-xs text-slate-500 mb-2">
                               Missing: {call.missingDetails.join(', ')}
                             </div>
                           )}
@@ -684,17 +601,17 @@ export const DailyInsights = () => {
 
                   {/* Expanded detail */}
                   {expandedCall === call.id && (
-                    <div className="px-5 pb-5 pt-2 border-t border-red-50 space-y-4 bg-red-50/30">
+                    <div className="px-5 pb-5 pt-2 border-t border-slate-100 space-y-4 bg-slate-50/40">
                       {call.recordingUrl && (
                         <div>
                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                             <Headphones className="w-3 h-3" /> Recording
                           </p>
-                          <MiniPlayer src={call.recordingUrl} />
+                          <SeekableAudioPlayer src={call.recordingUrl} compact />
                         </div>
                       )}
                       {call.summary && (
-                        <div className="bg-white rounded-lg border border-red-100 p-4">
+                        <div className="bg-white rounded-lg border border-slate-200 p-4">
                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">What Happened</p>
                           <p className="text-sm text-slate-700 leading-relaxed italic">"{call.summary}"</p>
                         </div>
@@ -737,7 +654,7 @@ export const DailyInsights = () => {
                           </div>
                         </div>
                       )}
-                      <div className="mt-4 pt-4 border-t border-red-100">
+                      <div className="mt-4 pt-4 border-t border-slate-100">
                         <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Add New Feedback</p>
                         <div className="flex gap-2">
                           <textarea
@@ -812,8 +729,11 @@ export const DailyInsights = () => {
                     </div>
                     {!!tour.tags?.length && (
                       <div className="flex flex-wrap gap-1 mt-2">
-                        {tour.tags.slice(0, 4).map((tag, idx) => (
-                          <span key={idx} className="px-2 py-0.5 rounded-full text-[9px] font-medium border bg-blue-100 text-blue-700 border-blue-200">
+                        {dedupeTags(tour.tags).slice(0, 4).map((tag, idx) => (
+                          <span
+                            key={idx}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-medium border ${getTagClassName(tag)}`}
+                          >
                             {tag}
                           </span>
                         ))}

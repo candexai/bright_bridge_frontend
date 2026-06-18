@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-    Phone, Loader2, MessageSquare, Play, Pause, Clock,
-    Calendar, ChevronDown, User, Bot, Headphones, Download
+    Phone, Loader2, MessageSquare, Clock,
+    Calendar, ChevronDown, User, Bot
 } from 'lucide-react';
 import api from '../../api/axios';
+import { SeekableAudioPlayer } from '../../components/SeekableAudioPlayer';
 
 interface TranscriptItem {
     role: string;
@@ -22,148 +23,6 @@ interface CallLogData {
     duration: number;
     createdAt: string;
 }
-
-const AudioPlayer = ({ src }: { src: string }) => {
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(0);
-    const [error, setError] = useState(false);
-    const [loading, setLoading] = useState(true);
-    const audioRef = useRef<HTMLAudioElement>(null);
-    const progressBarRef = useRef<HTMLDivElement>(null);
-    const isScrubbingRef = useRef(false);
-
-    const togglePlay = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!audioRef.current || error) return;
-        isPlaying ? audioRef.current.pause() : audioRef.current.play();
-        setIsPlaying(!isPlaying);
-    };
-
-    const seekToClientX = (clientX: number) => {
-        if (!audioRef.current || !progressBarRef.current || error) return;
-        const rect = progressBarRef.current.getBoundingClientRect();
-        const x = clientX - rect.left;
-        const width = rect.width || 1;
-        const percentage = Math.max(0, Math.min(1, x / width));
-        audioRef.current.currentTime = percentage * (audioRef.current.duration || 0);
-    };
-
-    const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-        e.stopPropagation();
-        if (error || loading) return;
-        isScrubbingRef.current = true;
-        e.currentTarget.setPointerCapture(e.pointerId);
-        seekToClientX(e.clientX);
-    };
-
-    const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-        if (!isScrubbingRef.current) return;
-        e.stopPropagation();
-        seekToClientX(e.clientX);
-    };
-
-    const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-        if (!isScrubbingRef.current) return;
-        e.stopPropagation();
-        isScrubbingRef.current = false;
-        try {
-            e.currentTarget.releasePointerCapture(e.pointerId);
-        } catch {
-            // ignore
-        }
-    };
-
-    const formatTime = (time: number) => {
-        if (isNaN(time)) return '0:00';
-        const min = Math.floor(time / 60);
-        const sec = Math.floor(time % 60);
-        return `${min}:${sec.toString().padStart(2, '0')}`;
-    };
-
-    const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
-
-    return (
-        <div className={`bg-slate-50 border border-slate-200 rounded-xl p-4 w-full ${error ? 'opacity-75' : ''}`}>
-            <audio
-                ref={audioRef} src={src}
-                onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)}
-                onLoadedMetadata={() => {
-                    if (audioRef.current) {
-                        setDuration(audioRef.current.duration);
-                        setLoading(false);
-                    }
-                }}
-                onCanPlay={() => setLoading(false)}
-                onError={() => {
-                    setError(true);
-                    setLoading(false);
-                }}
-                onEnded={() => setIsPlaying(false)}
-                hidden
-            />
-
-            <div className="flex items-center gap-4 mb-2">
-                <button
-                    onClick={togglePlay}
-                    disabled={error || loading}
-                    className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all shrink-0 ${error ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white hover:bg-blue-700'
-                        }`}
-                >
-                    {loading ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : isPlaying ? (
-                        <Pause className="w-4 h-4" />
-                    ) : (
-                        <Play className="w-4 h-4 fill-current ml-0.5" />
-                    )}
-                </button>
-                <div className="flex-1">
-                    {error ? (
-                        <div className="h-7 flex items-center justify-center text-[10px] font-semibold text-red-500 bg-red-50 rounded italic">
-                            Recording unavailable or still processing
-                        </div>
-                    ) : (
-                        <>
-                            <div
-                                ref={progressBarRef}
-                                onPointerDown={handlePointerDown}
-                                onPointerMove={handlePointerMove}
-                                onPointerUp={handlePointerUp}
-                                className="h-1.5 bg-slate-200 rounded-full cursor-pointer relative touch-none"
-                                role="slider"
-                                aria-label="Seek audio"
-                                aria-valuemin={0}
-                                aria-valuemax={Math.max(0, Math.floor(duration))}
-                                aria-valuenow={Math.max(0, Math.floor(currentTime))}
-                            >
-                                <div className="absolute inset-y-0 left-0 bg-blue-500 rounded-full" style={{ width: `${progressPercentage}%` }} />
-                            </div>
-                            <div className="flex justify-between mt-1.5">
-                                <span className="text-[10px] font-bold text-slate-400">{formatTime(currentTime)}</span>
-                                <span className="text-[10px] font-bold text-slate-400">{formatTime(duration)}</span>
-                            </div>
-                        </>
-                    )}
-                </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                <div className="flex items-center gap-2 text-slate-400">
-                    <Headphones className="w-3.5 h-3.5" />
-                    <span className="text-[9px] font-bold uppercase tracking-wider">
-                        {error ? 'Error loading audio' : 'Recording Console'}
-                    </span>
-                </div>
-                {!error && !loading && (
-                    <a href={src} download className="text-slate-400 hover:text-blue-600">
-                        <Download className="w-3.5 h-3.5" />
-                    </a>
-                )}
-            </div>
-        </div>
-    );
-};
 
 export const SchoolCallLogs = () => {
     const { t } = useTranslation();
@@ -248,7 +107,7 @@ export const SchoolCallLogs = () => {
                                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                                     {/* Summary & Audio */}
                                     <div className="xl:col-span-4 space-y-4">
-                                        <AudioPlayer src={log.recordingUrl} />
+                                        <SeekableAudioPlayer src={log.recordingUrl} />
                                         {log.summary && (
                                             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
                                                 <div className="flex items-center gap-2 mb-3">

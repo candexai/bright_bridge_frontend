@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Activity, PhoneCall, Mic, TrendingUp, ArrowRight, Lightbulb } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -41,11 +41,32 @@ interface DashboardResponse {
 
 }
 
+type DashboardPeriod = '30d' | '15d' | '7d' | '1d' | 'custom';
+
+const PERIOD_OPTIONS: Array<{ value: DashboardPeriod; label: string }> = [
+  { value: '30d', label: 'Last 30 days' },
+  { value: '15d', label: 'Last 15 days' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '1d', label: 'Last 1 day' },
+  { value: 'custom', label: 'Custom' },
+];
+
+function buildDashboardQuery(period: DashboardPeriod, customStart: string, customEnd: string) {
+  const params: Record<string, string> = { period };
+  if (period === 'custom' && customStart && customEnd) {
+    params.startDate = customStart;
+    params.endDate = customEnd;
+  }
+  return params;
+}
+
 export const SchoolDashboard = () => {
   const { t } = useTranslation();
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState('monthly');
+  const [period, setPeriod] = useState<DashboardPeriod>('30d');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
   const [tourBookings, setTourBookings] = useState<Array<{
@@ -60,10 +81,20 @@ export const SchoolDashboard = () => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [segmentFilter, setSegmentFilter] = useState<ParentSegment>('new_parent');
 
-  const fetchDashboard = React.useCallback(async (p: string, signal?: AbortSignal) => {
-    console.log(`[Dashboard] Fetching dashboard for period: ${p}`);
+  const customRangeReady = period !== 'custom' || (Boolean(customStartDate) && Boolean(customEndDate) && customStartDate <= customEndDate);
+
+  const dashboardQuery = useMemo(
+    () => buildDashboardQuery(period, customStartDate, customEndDate),
+    [period, customStartDate, customEndDate]
+  );
+
+  const fetchDashboard = React.useCallback(async (query: Record<string, string>, signal?: AbortSignal) => {
+    if (query.period === 'custom' && (!query.startDate || !query.endDate)) {
+      return;
+    }
+    console.log(`[Dashboard] Fetching dashboard for period:`, query);
     try {
-      const dashboardRes = await api.get(`/school/dashboard?period=${p}`, { signal });
+      const dashboardRes = await api.get('/school/dashboard', { params: query, signal });
       console.log(`[Dashboard] Received data for period: ${dashboardRes.data.period}`, dashboardRes.data.metrics);
       setData(dashboardRes.data);
       setLastUpdated(new Date());
@@ -92,20 +123,24 @@ export const SchoolDashboard = () => {
   }, []);
 
   useEffect(() => {
-    console.log(`[Dashboard] useEffect triggered by period: ${period}`);
+    if (!customRangeReady) {
+      setLoading(false);
+      return;
+    }
+    console.log(`[Dashboard] useEffect triggered by period:`, dashboardQuery);
     const controller = new AbortController();
     setLoading(true);
-    void fetchDashboard(period, controller.signal);
+    void fetchDashboard(dashboardQuery, controller.signal);
     void fetchTourBookings(controller.signal);
     const intervalId = setInterval(() => {
-      fetchDashboard(period);
+      fetchDashboard(dashboardQuery);
       fetchTourBookings();
     }, 30000);
     return () => {
       controller.abort();
       clearInterval(intervalId);
     };
-  }, [period, fetchDashboard, fetchTourBookings]);
+  }, [dashboardQuery, customRangeReady, fetchDashboard, fetchTourBookings]);
 
 
 
@@ -119,6 +154,17 @@ export const SchoolDashboard = () => {
   }
 
   if (!data) {
+    if (period === 'custom' && !customRangeReady) {
+      return (
+        <div className="animate-soft max-w-[1600px] mx-auto">
+          <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
+            <Activity className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+            <h3 className="text-lg font-bold text-slate-900 mb-1">Select a date range</h3>
+            <p className="text-slate-500 text-sm">Choose a start and end date to view dashboard metrics.</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
         <Activity className="w-12 h-12 text-slate-300 mx-auto mb-4" />
@@ -148,21 +194,40 @@ export const SchoolDashboard = () => {
           <p className="text-sm font-medium text-slate-500">{t('dashboard_desc')}</p>
         </div>
 
-        <div className="flex items-center gap-4 flex-wrap w-full md:w-auto">
-          {/* Period Filter Pills - Restoration */}
-          <div className="flex items-center bg-slate-100 border border-slate-200 rounded-xl p-1 shadow-inner w-full sm:w-auto">
-            {(['weekly', 'monthly'] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPeriod(p)}
-                className={`flex-1 sm:flex-none px-5 py-2 rounded-lg text-xs font-bold transition-all capitalize ${period === p
-                    ? 'bg-white text-slate-900 shadow-md'
-                    : 'bg-transparent text-slate-400 hover:text-slate-600'
-                  }`}
-              >
-                {p}
-              </button>
-            ))}
+        <div className="flex items-center gap-3 flex-wrap w-full md:w-auto">
+          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+            <select
+              value={period}
+              onChange={(e) => setPeriod(e.target.value as DashboardPeriod)}
+              className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm min-w-[140px]"
+            >
+              {PERIOD_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
+            {period === 'custom' && (
+              <>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                  aria-label="Start date"
+                />
+                <span className="text-xs font-bold text-slate-400">to</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  max={new Date().toISOString().slice(0, 10)}
+                  className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                  aria-label="End date"
+                />
+              </>
+            )}
           </div>
 
           <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block" />

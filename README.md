@@ -4,7 +4,7 @@
    A production-ready SaaS dashboard application for childcare school enrollment management with separate portals for schools and administrators.
    
 
-## Tech Stack
+# Tech Stack
 
 - **Vite** - Build tool and dev server
 - **React 19** - UI library

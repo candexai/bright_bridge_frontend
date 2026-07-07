@@ -8,7 +8,7 @@
 
 - **Vite** - Build tool and dev server
 - **React 19** - UI library
-- **TypeScript** - Type safety
+- **TypeScript** - Type safety 
 - **React Router** - Client-side routing
 - **TailwindCSS** - Utility-first CSS framework
 - **Zustand** - Lightweight state management

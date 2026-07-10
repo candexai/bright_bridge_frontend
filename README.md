@@ -10,7 +10,7 @@
 - **React 19** - UI library
 - **TypeScript** - Type safety 
 - **React Router** - Client-side routing
-- **TailwindCSS** - Utility-first CSS framework
+- **TailwindCSS** - Utility-first CSS framework 
 - **Zustand** - Lightweight state management
 - **Axios** - HTTP client
 - **Lucide React** - Icon library

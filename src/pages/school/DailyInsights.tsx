@@ -97,6 +97,9 @@ function getTagClassName(tag: string): string {
   const segmentClass = getSegmentTagClassName(tag);
   if (segmentClass) return segmentClass;
   const lower = tag.toLowerCase();
+  if (lower === 'past call name used') {
+    return 'bg-amber-50 text-amber-900 border-amber-200';
+  }
   if (lower.includes('hot lead')) {
     return 'bg-amber-50 text-amber-800 border-amber-200';
   }
@@ -107,6 +110,12 @@ function getTagClassName(tag: string): string {
     return getTourBookedBadgeClassName();
   }
   return 'bg-slate-50 text-slate-600 border-slate-200';
+}
+
+function phoneKey(phone: string) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits.length >= 7 ? digits : '';
 }
 
 interface TodayTour {
@@ -138,6 +147,7 @@ export const DailyInsights = () => {
   const [inquiryTab, setInquiryTab] = useState<InquiryTab>('all');
   const [segmentFilter, setSegmentFilter] = useState<ParentSegment>('new_parent');
   const [callerSearch, setCallerSearch] = useState('');
+  const [phoneFilter, setPhoneFilter] = useState<string | null>(null);
   const [expandedCall, setExpandedCall] = useState<string | null>(null);
   const [, setNow] = useState(Date.now());
   const [feedbackInputs, setFeedbackInputs] = useState<Record<string, string>>({});
@@ -369,6 +379,7 @@ export const DailyInsights = () => {
     const searchDigits = normalizedSearch.replace(/\D/g, '');
 
     for (const call of needsAttention) {
+      if (phoneFilter && phoneKey(call.callerPhone) !== phoneFilter) continue;
       if (normalizedSearch) {
         const name = String(call.callerName || '').toLowerCase();
         const phone = String(call.callerPhone || '');
@@ -383,19 +394,20 @@ export const DailyInsights = () => {
       counts[segment] += 1;
     }
     return counts;
-  }, [needsAttention, callerSearch]);
+  }, [needsAttention, callerSearch, phoneFilter]);
 
   const actionNeededCount = useMemo(() => {
     // Keep Action Needed identical to the New Parent chip (+ any callback-tagged enrollment items).
     const fromNewParent = segmentCounts.new_parent;
     const extraCallbacks = needsAttention.filter((call) => {
+      if (phoneFilter && phoneKey(call.callerPhone) !== phoneFilter) return false;
       const segment = call.parentSegment || 'new_parent';
       if (segment === 'new_parent') return false;
       if (segment === 'unknown' || segment === 'current_family') return false;
       return hasCallbackRequestTag(call.tags || []);
     }).length;
     return fromNewParent + extraCallbacks;
-  }, [needsAttention, segmentCounts]);
+  }, [needsAttention, segmentCounts, phoneFilter]);
 
   const displayedInquiries = useMemo(() => {
     const normalizedSearch = callerSearch.trim().toLowerCase();
@@ -403,7 +415,13 @@ export const DailyInsights = () => {
 
     let list = inquiryTab === 'hot_leads'
       ? hotLeads
-      : needsAttention.filter((call) => (call.parentSegment || 'new_parent') === segmentFilter);
+      : phoneFilter
+        ? needsAttention.filter((call) => phoneKey(call.callerPhone) === phoneFilter)
+        : needsAttention.filter((call) => (call.parentSegment || 'new_parent') === segmentFilter);
+
+    if (phoneFilter && inquiryTab === 'hot_leads') {
+      list = list.filter((call) => phoneKey(call.callerPhone) === phoneFilter);
+    }
 
     if (normalizedSearch) {
       list = list.filter((call) => {
@@ -418,7 +436,18 @@ export const DailyInsights = () => {
     }
 
     return list;
-  }, [inquiryTab, hotLeads, needsAttention, segmentFilter, callerSearch]);
+  }, [inquiryTab, hotLeads, needsAttention, segmentFilter, callerSearch, phoneFilter]);
+
+  const phoneFilterLabel = phoneFilter
+    ? (needsAttention.find((c) => phoneKey(c.callerPhone) === phoneFilter)?.callerPhone || phoneFilter)
+    : null;
+
+  const openPhoneHistory = (phone: string) => {
+    const key = phoneKey(phone);
+    if (!key) return;
+    setPhoneFilter((prev) => (prev === key ? null : key));
+    setExpandedCall(null);
+  };
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -533,7 +562,9 @@ export const DailyInsights = () => {
                 <div className="min-w-0">
                   <h2 className="text-sm font-bold text-slate-900 tracking-wide">Inquiries needing attention</h2>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    {inquiryTab === 'hot_leads'
+                    {phoneFilter
+                      ? `All calls from ${phoneFilterLabel}`
+                      : inquiryTab === 'hot_leads'
                       ? 'High-intent enrollment follow-ups'
                       : `${getSegmentLabel(segmentFilter)} queue · last 30 days`}
                   </p>
@@ -556,9 +587,24 @@ export const DailyInsights = () => {
                 />
               </div>
 
+              {phoneFilter && (
+                <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-2">
+                  <p className="text-xs font-semibold text-indigo-800">
+                    Showing all calls from <span className="tabular-nums">{phoneFilterLabel}</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setPhoneFilter(null)}
+                    className="text-xs font-bold text-indigo-700 hover:text-indigo-900 underline-offset-2 hover:underline"
+                  >
+                    Clear number filter
+                  </button>
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center gap-2">
                 {(['new_parent', 'current_family', 'unknown'] as ParentSegment[]).map((segment) => {
-                  const active = segmentFilter === segment && inquiryTab !== 'hot_leads';
+                  const active = !phoneFilter && segmentFilter === segment && inquiryTab !== 'hot_leads';
                   return (
                     <button
                       key={segment}
@@ -566,6 +612,7 @@ export const DailyInsights = () => {
                       onClick={() => {
                         setSegmentFilter(segment);
                         setInquiryTab('all');
+                        setPhoneFilter(null);
                       }}
                       className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${getSegmentFilterButtonClassName(segment, active)}`}
                     >
@@ -580,7 +627,10 @@ export const DailyInsights = () => {
                 })}
                 <button
                   type="button"
-                  onClick={() => setInquiryTab(inquiryTab === 'hot_leads' ? 'all' : 'hot_leads')}
+                  onClick={() => {
+                    setInquiryTab(inquiryTab === 'hot_leads' ? 'all' : 'hot_leads');
+                    setPhoneFilter(null);
+                  }}
                   className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ml-auto ${
                     inquiryTab === 'hot_leads'
                       ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
@@ -647,9 +697,24 @@ export const DailyInsights = () => {
                               <span className="text-xs text-slate-500">{call.callerPhone}</span>
                             )}
                             {call.callOrdinalLabel && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                {call.callOrdinalLabel}
-                              </span>
+                              (call.callCountTotal || 0) > 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openPhoneHistory(call.callerPhone)}
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors ${
+                                    phoneFilter && phoneKey(call.callerPhone) === phoneFilter
+                                      ? 'bg-indigo-600 text-white border-indigo-600'
+                                      : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                                  }`}
+                                  title="View all calls from this number"
+                                >
+                                  {call.callOrdinalLabel}
+                                </button>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  {call.callOrdinalLabel}
+                                </span>
+                              )
                             )}
                           </div>
                           

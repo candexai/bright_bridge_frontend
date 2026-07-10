@@ -89,6 +89,10 @@ function getDisplayTags(log: CallLogData): Array<{ label: string; className: str
     if (lower === 'new parent' || lower === 'current family' || lower === 'unknown') continue;
     seen.add(lower);
 
+    if (lower === 'past call name used') {
+      badges.push({ label, className: 'bg-amber-50 text-amber-900 border-amber-200' });
+      continue;
+    }
     if (lower.includes('email missing')) {
       badges.push({ label: label || TOUR_EMAIL_MISSING_LABEL, className: getTourEmailMissingBadgeClassName() });
       continue;
@@ -105,7 +109,13 @@ function getDisplayTags(log: CallLogData): Array<{ label: string; className: str
     });
   }
 
-  return badges.slice(0, 4);
+  return badges.slice(0, 5);
+}
+
+function phoneKey(phone: string) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits.length >= 7 ? digits : '';
 }
 
 export const SchoolCallLogs = () => {
@@ -118,6 +128,7 @@ export const SchoolCallLogs = () => {
     const [customStartDate, setCustomStartDate] = useState('');
     const [customEndDate, setCustomEndDate] = useState('');
     const [segmentFilter, setSegmentFilter] = useState<SegmentFilter>('all');
+    const [phoneFilter, setPhoneFilter] = useState<string | null>(null);
 
     const rangeReady =
       period !== 'custom'
@@ -137,26 +148,41 @@ export const SchoolCallLogs = () => {
         unknown: 0,
       };
       for (const log of logs) {
+        if (phoneFilter && phoneKey(log.participantId) !== phoneFilter) continue;
         const segment = (log.parentSegment || 'unknown') as ParentSegment;
         counts[segment] = (counts[segment] || 0) + 1;
       }
       return counts;
-    }, [logs]);
+    }, [logs, phoneFilter]);
 
     const filteredLogs = useMemo(() => {
-      if (segmentFilter === 'all') return logs;
-      return logs.filter((log) => (log.parentSegment || 'unknown') === segmentFilter);
-    }, [logs, segmentFilter]);
+      return logs.filter((log) => {
+        if (phoneFilter && phoneKey(log.participantId) !== phoneFilter) return false;
+        if (segmentFilter !== 'all' && (log.parentSegment || 'unknown') !== segmentFilter) return false;
+        return true;
+      });
+    }, [logs, segmentFilter, phoneFilter]);
 
     const filteredTotal = filteredLogs.length;
     const segmentLabel =
       segmentFilter === 'all' ? 'All segments' : getSegmentLabel(segmentFilter);
+    const phoneFilterLabel = phoneFilter
+      ? (logs.find((log) => phoneKey(log.participantId) === phoneFilter)?.participantId || phoneFilter)
+      : null;
 
     useEffect(() => {
       if (expandedId && !filteredLogs.some((log) => log.id === expandedId)) {
         setExpandedId(null);
       }
     }, [expandedId, filteredLogs]);
+
+    const openPhoneHistory = (phone: string) => {
+      const key = phoneKey(phone);
+      if (!key) return;
+      setPhoneFilter((prev) => (prev === key ? null : key));
+      setSegmentFilter('all');
+      setExpandedId(null);
+    };
 
     const fetchLogs = useCallback(async (params: Record<string, string>, signal?: AbortSignal) => {
       if (params.period === 'custom' && (!params.startDate || !params.endDate)) return;
@@ -219,6 +245,8 @@ export const SchoolCallLogs = () => {
                   <p className="text-xs text-slate-400 mt-0.5">
                     {loading
                       ? 'Loading calls…'
+                      : phoneFilter
+                        ? `${filteredTotal} call${filteredTotal === 1 ? '' : 's'} from ${phoneFilterLabel}`
                       : segmentFilter === 'all'
                         ? `${total} call${total === 1 ? '' : 's'} in ${periodLabel.toLowerCase()}`
                         : `${filteredTotal} of ${total} · ${segmentLabel} · ${periodLabel.toLowerCase()}`}
@@ -256,9 +284,12 @@ export const SchoolCallLogs = () => {
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => setSegmentFilter('all')}
+                  onClick={() => {
+                    setSegmentFilter('all');
+                    setPhoneFilter(null);
+                  }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
-                    segmentFilter === 'all'
+                    segmentFilter === 'all' && !phoneFilter
                       ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
                       : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                   }`}
@@ -270,14 +301,31 @@ export const SchoolCallLogs = () => {
                   <button
                     key={segment}
                     type="button"
-                    onClick={() => setSegmentFilter(segment)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${getSegmentFilterButtonClassName(segment, segmentFilter === segment)}`}
+                    onClick={() => {
+                      setSegmentFilter(segment);
+                      setPhoneFilter(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${getSegmentFilterButtonClassName(segment, !phoneFilter && segmentFilter === segment)}`}
                   >
                     {getSegmentLabel(segment)}
                     <span className="ml-1.5 tabular-nums opacity-80">{segmentCounts[segment]}</span>
                   </button>
                 ))}
               </div>
+              {phoneFilter && (
+                <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-2">
+                  <p className="text-xs font-semibold text-indigo-800">
+                    Showing all calls from <span className="tabular-nums">{phoneFilterLabel}</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setPhoneFilter(null)}
+                    className="text-xs font-bold text-indigo-700 hover:text-indigo-900 underline-offset-2 hover:underline"
+                  >
+                    Clear number filter
+                  </button>
+                </div>
+              )}
             </div>
 
             {!rangeReady ? (
@@ -301,7 +349,9 @@ export const SchoolCallLogs = () => {
               <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
                 <Phone className="w-10 h-10 text-slate-300 mx-auto mb-3" />
                 <p className="text-sm font-semibold text-slate-700">
-                  No {segmentLabel.toLowerCase()} calls in {periodLabel.toLowerCase()}
+                  {phoneFilter
+                    ? `No calls found for ${phoneFilterLabel}`
+                    : `No ${segmentLabel.toLowerCase()} calls in ${periodLabel.toLowerCase()}`}
                 </p>
                 <p className="text-xs text-slate-400 mt-1">Try another segment or a wider date range.</p>
               </div>
@@ -311,6 +361,7 @@ export const SchoolCallLogs = () => {
                     const phone = String(log.participantId || '').replace(/^sip_/i, '');
                     const showName = isUsableDisplayName(log.callerName);
                     const badges = getDisplayTags(log);
+                    const multiCall = (log.callCountTotal || 0) > 1;
                     return (
                     <div key={log.id} className={`bg-white border rounded-2xl transition-all ${expandedId === log.id ? 'border-blue-500 shadow-xl' : 'border-slate-200 shadow-sm hover:border-slate-300'}`}>
                         <div className="px-4 sm:px-6 py-4 flex items-center justify-between cursor-pointer" onClick={() => toggleExpand(log.id)}>
@@ -329,9 +380,27 @@ export const SchoolCallLogs = () => {
                                           </span>
                                         )}
                                         {log.callOrdinalLabel && (
-                                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
-                                            {log.callOrdinalLabel}
-                                          </span>
+                                          multiCall ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                openPhoneHistory(log.participantId);
+                                              }}
+                                              className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border whitespace-nowrap transition-colors ${
+                                                phoneFilter && phoneKey(log.participantId) === phoneFilter
+                                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                                  : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                                              }`}
+                                              title="View all calls from this number"
+                                            >
+                                              {log.callOrdinalLabel}
+                                            </button>
+                                          ) : (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
+                                              {log.callOrdinalLabel}
+                                            </span>
+                                          )
                                         )}
                                         <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase whitespace-nowrap">
                                             <Calendar className="w-3 h-3" />

@@ -98,6 +98,7 @@ export const SchoolDashboard = () => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [segmentFilter, setSegmentFilter] = useState<ParentSegment>('new_parent');
   const [callerSearch, setCallerSearch] = useState('');
+  const [phoneFilter, setPhoneFilter] = useState<string | null>(null);
 
   const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
   const [recentCallsLoading, setRecentCallsLoading] = useState(true);
@@ -243,12 +244,19 @@ export const SchoolDashboard = () => {
   const normalizedCallerSearch = callerSearch.trim().toLowerCase();
   const normalizedCallerSearchDigits = normalizedCallerSearch.replace(/\D/g, '');
 
+  const phoneKey = (phone: string) => {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length >= 10) return digits.slice(-10);
+    return digits.length >= 7 ? digits : '';
+  };
+
   const segmentCounts: Record<ParentSegment, number> = {
     new_parent: 0,
     current_family: 0,
     unknown: 0,
   };
   for (const call of recentCalls) {
+    if (phoneFilter && phoneKey(call.callerPhone) !== phoneFilter) continue;
     if (normalizedCallerSearch) {
       const name = String(call.callerName || '').toLowerCase();
       const phone = String(call.callerPhone || '');
@@ -264,7 +272,12 @@ export const SchoolDashboard = () => {
   }
 
   const filteredRecentCalls = recentCalls.filter((call) => {
-    if ((call.parentSegment || 'new_parent') !== segmentFilter) return false;
+    // When viewing one number's history, show every call from that number.
+    if (phoneFilter) {
+      if (phoneKey(call.callerPhone) !== phoneFilter) return false;
+    } else if ((call.parentSegment || 'new_parent') !== segmentFilter) {
+      return false;
+    }
     if (!normalizedCallerSearch) return true;
     const name = String(call.callerName || '').toLowerCase();
     const phone = String(call.callerPhone || '');
@@ -277,7 +290,19 @@ export const SchoolDashboard = () => {
   const recentCallsPeriodLabel =
     RECENT_CALLS_PERIOD_OPTIONS.find((opt) => opt.value === recentCallsPeriod)?.label
     || 'selected range';
+  const phoneFilterLabel = phoneFilter
+    ? (recentCalls.find((c) => phoneKey(c.callerPhone) === phoneFilter)?.callerPhone || phoneFilter)
+    : null;
 
+  const hasPastCallNameTag = (tags: string[] = []) =>
+    tags.some((tag) => String(tag).trim().toLowerCase() === 'past call name used');
+
+  const openPhoneHistory = (phone: string) => {
+    const key = phoneKey(phone);
+    if (!key) return;
+    setPhoneFilter((prev) => (prev === key ? null : key));
+    setExpandedId(null);
+  };
 
   return (
     <div className="animate-soft max-w-[1600px] mx-auto">
@@ -463,8 +488,11 @@ export const SchoolDashboard = () => {
                 <button
                   key={segment}
                   type="button"
-                  onClick={() => setSegmentFilter(segment)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${getSegmentFilterButtonClassName(segment, segmentFilter === segment)}`}
+                  onClick={() => {
+                    setSegmentFilter(segment);
+                    setPhoneFilter(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${getSegmentFilterButtonClassName(segment, !phoneFilter && segmentFilter === segment)}`}
                 >
                   {getSegmentLabel(segment)}
                   <span className="ml-1.5 tabular-nums opacity-80">{segmentCounts[segment]}</span>
@@ -475,6 +503,21 @@ export const SchoolDashboard = () => {
               </Link>
             </div>
           </div>
+          {phoneFilter && (
+            <div className="px-6 py-2.5 border-b border-indigo-100 bg-indigo-50/60 flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-xs font-semibold text-indigo-800">
+                Showing all {filteredRecentCalls.length} call{filteredRecentCalls.length === 1 ? '' : 's'} from{' '}
+                <span className="tabular-nums">{phoneFilterLabel}</span>
+              </p>
+              <button
+                type="button"
+                onClick={() => setPhoneFilter(null)}
+                className="text-xs font-bold text-indigo-700 hover:text-indigo-900 underline-offset-2 hover:underline"
+              >
+                Clear number filter
+              </button>
+            </div>
+          )}
           <div className="overflow-x-auto relative min-h-[120px]">
             {recentCallsLoading && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/80 backdrop-blur-[1px]">
@@ -502,7 +545,9 @@ export const SchoolDashboard = () => {
                 {filteredRecentCalls.length === 0 && !recentCallsLoading ? (
                   <tr>
                     <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-500">
-                      {normalizedCallerSearch
+                      {phoneFilter
+                        ? `No calls found for ${phoneFilterLabel}.`
+                        : normalizedCallerSearch
                         ? `No ${getSegmentLabel(segmentFilter).toLowerCase()} calls match “${callerSearch.trim()}”.`
                         : `No ${getSegmentLabel(segmentFilter).toLowerCase()} calls in ${recentCallsPeriodLabel.toLowerCase()}.`}
                     </td>
@@ -528,9 +573,27 @@ export const SchoolDashboard = () => {
                         <div className="text-sm font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{call.callerName}</div>
                         <div className="text-xs text-slate-500 font-medium">{call.callerPhone}</div>
                         {call.callOrdinalLabel && (
-                          <span className="inline-flex items-center mt-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                            {call.callOrdinalLabel}
-                          </span>
+                          (call.callCountTotal || 0) > 1 ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPhoneHistory(call.callerPhone);
+                              }}
+                              className={`inline-flex items-center mt-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors ${
+                                phoneFilter && phoneKey(call.callerPhone) === phoneFilter
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                              }`}
+                              title="View all calls from this number"
+                            >
+                              {call.callOrdinalLabel}
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center mt-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              {call.callOrdinalLabel}
+                            </span>
+                          )
                         )}
                       </td>
                       <td className="px-6 py-4">
@@ -538,6 +601,11 @@ export const SchoolDashboard = () => {
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-semibold border ${getSegmentBadgeClassName(call.parentSegment)}`}>
                             {getSegmentLabel(call.parentSegment)}
                           </span>
+                          {hasPastCallNameTag(call.tags) && (
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-semibold border bg-amber-50 text-amber-900 border-amber-200">
+                              Past call name used
+                            </span>
+                          )}
                           {call.tourBookingDetected && (
                             <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-semibold border ${getTourBookedBadgeClassName()}`}>
                               Tour Booked

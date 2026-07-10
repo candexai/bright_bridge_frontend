@@ -17,6 +17,7 @@ interface CalendarProps {
 export const Calendar: React.FC<CalendarProps> = ({ bookings }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const safeBookings = Array.isArray(bookings) ? bookings : [];
   
   const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
   const firstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
@@ -49,7 +50,7 @@ export const Calendar: React.FC<CalendarProps> = ({ bookings }) => {
   for (let day = 1; day <= totalDays; day++) {
     const dateToCheck = new Date(year, month, day);
     const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-    const dayBookings = bookings.filter(b => b.scheduledAt.startsWith(dateStr));
+    const dayBookings = safeBookings.filter(b => b.scheduledAt.startsWith(dateStr));
     
     const isToday = new Date().toDateString() === dateToCheck.toDateString();
     const isSelected = selectedDate.toDateString() === dateToCheck.toDateString();
@@ -83,10 +84,10 @@ export const Calendar: React.FC<CalendarProps> = ({ bookings }) => {
   const selectedDateStr = `${selectedDate.getFullYear()}-${(selectedDate.getMonth() + 1).toString().padStart(2, '0')}-${selectedDate.getDate().toString().padStart(2, '0')}`;
   
   const selectedDateBookings = useMemo(() => {
-    return [...bookings]
+    return [...safeBookings]
       .filter(b => b.scheduledAt.startsWith(selectedDateStr))
       .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
-  }, [bookings, selectedDateStr]);
+  }, [safeBookings, selectedDateStr]);
 
   const isSelectedToday = selectedDate.toDateString() === new Date().toDateString();
 

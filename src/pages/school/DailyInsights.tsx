@@ -294,9 +294,9 @@ export const DailyInsights = () => {
     const load = async () => {
       try {
         const res = await api.get('/school/daily-insights');
-        setNeedsAttention(res.data.actionNeeded || []);
-        setTodaysTours(res.data.todaysTours || []);
-        setTodayCalls(res.data.todayCalls || []);
+        setNeedsAttention(Array.isArray(res.data?.actionNeeded) ? res.data.actionNeeded : []);
+        setTodaysTours(Array.isArray(res.data?.todaysTours) ? res.data.todaysTours : []);
+        setTodayCalls(Array.isArray(res.data?.todayCalls) ? res.data.todayCalls : []);
       } catch (err) {
         console.error('Failed to load daily insights:', err);
       } finally {
@@ -668,7 +668,7 @@ export const DailyInsights = () => {
               {displayedInquiries.map((call) => {
                 const displayTags = getCallDisplayTags(call);
                 // Get initials from caller name
-                const initials = call.callerName
+                const initials = String(call.callerName || 'P')
                   .split(' ')
                   .map(n => n[0])
                   .join('')

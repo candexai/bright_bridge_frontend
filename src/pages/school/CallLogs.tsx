@@ -190,12 +190,16 @@ export const SchoolCallLogs = () => {
         setLoading(true);
         const res = await api.get('/school/call-logs', { params, signal });
         const payload = res.data;
+        // Support both legacy array responses and newer `{ logs, total }` payloads.
         if (Array.isArray(payload)) {
           setLogs(payload);
           setTotal(payload.length);
+        } else if (payload && Array.isArray(payload.logs)) {
+          setLogs(payload.logs);
+          setTotal(Number(payload.total) || payload.logs.length);
         } else {
-          setLogs(Array.isArray(payload?.logs) ? payload.logs : []);
-          setTotal(Number(payload?.total) || 0);
+          setLogs([]);
+          setTotal(0);
         }
       } catch (err) {
         if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return;
@@ -459,7 +463,7 @@ export const SchoolCallLogs = () => {
                                         </div>
 
                                         <div className="bg-white border border-slate-200 rounded-2xl p-5 max-h-[450px] overflow-y-auto custom-scrollbar shadow-inner">
-                                            {log.transcript.length > 0 ? (
+                                            {Array.isArray(log.transcript) && log.transcript.length > 0 ? (
                                                 <div className="space-y-4">
                                                     {log.transcript.map((msg, idx) => {
                                                         const isAI = msg.role.toLowerCase().includes('assistant') || msg.role.toLowerCase().includes('ai') || msg.role === 'Mia';

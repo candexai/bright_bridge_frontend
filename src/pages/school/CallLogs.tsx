@@ -1,11 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     Phone, Loader2, MessageSquare, Clock,
     Calendar, ChevronDown, User, Bot
 } from 'lucide-react';
+import axios from 'axios';
 import api from '../../api/axios';
 import { SeekableAudioPlayer } from '../../components/SeekableAudioPlayer';
+import {
+  type ParentSegment,
+  getSegmentLabel,
+  getSegmentBadgeClassName,
+  getSegmentFilterButtonClassName,
+  getSegmentTagClassName,
+  getTourBookedBadgeClassName,
+  getTourEmailMissingBadgeClassName,
+  TOUR_EMAIL_MISSING_LABEL,
+} from '../../utils/parentSegment';
+
+type SegmentFilter = ParentSegment | 'all';
+const SEGMENT_FILTERS: ParentSegment[] = ['new_parent', 'current_family', 'unknown'];
 
 interface TranscriptItem {
     role: string;
@@ -17,32 +31,165 @@ interface CallLogData {
     id: string;
     sessionId: string;
     participantId: string;
+    callerName?: string | null;
     transcript: TranscriptItem[];
     summary: string;
     recordingUrl: string;
     duration: number;
     createdAt: string;
+    parentSegment?: ParentSegment;
+    tags?: string[];
+    callOrdinal?: number;
+    callCountTotal?: number;
+    callOrdinalLabel?: string;
+}
+
+type CallLogsPeriod = '7d' | '30d' | '60d' | '90d' | 'all' | 'custom';
+
+const PERIOD_OPTIONS: Array<{ value: CallLogsPeriod; label: string }> = [
+  { value: 'all', label: 'All time' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: '60d', label: 'Last 60 days' },
+  { value: '90d', label: 'Last 90 days' },
+  { value: 'custom', label: 'Custom range' },
+];
+
+function buildPeriodQuery(period: CallLogsPeriod, start: string, end: string) {
+  const params: Record<string, string> = { period };
+  if (period === 'custom' && start && end) {
+    params.startDate = start;
+    params.endDate = end;
+  }
+  return params;
+}
+
+function isUsableDisplayName(name?: string | null) {
+  if (!name) return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  return lower !== 'parent' && lower !== 'unknown' && lower !== 'unknown caller';
+}
+
+function getDisplayTags(log: CallLogData): Array<{ label: string; className: string }> {
+  const badges: Array<{ label: string; className: string }> = [];
+  const segment = log.parentSegment || 'unknown';
+  badges.push({
+    label: getSegmentLabel(segment),
+    className: getSegmentBadgeClassName(segment),
+  });
+
+  const seen = new Set([getSegmentLabel(segment).toLowerCase()]);
+  for (const tag of log.tags || []) {
+    const label = String(tag || '').trim();
+    if (!label) continue;
+    const lower = label.toLowerCase();
+    if (seen.has(lower)) continue;
+    if (lower === 'new parent' || lower === 'current family' || lower === 'unknown') continue;
+    seen.add(lower);
+
+    if (lower.includes('email missing')) {
+      badges.push({ label: label || TOUR_EMAIL_MISSING_LABEL, className: getTourEmailMissingBadgeClassName() });
+      continue;
+    }
+    if (lower.includes('tour booked')) {
+      badges.push({ label, className: getTourBookedBadgeClassName() });
+      continue;
+    }
+
+    const segmentClass = getSegmentTagClassName(label);
+    badges.push({
+      label,
+      className: segmentClass || 'bg-slate-50 text-slate-600 border-slate-200',
+    });
+  }
+
+  return badges.slice(0, 4);
 }
 
 export const SchoolCallLogs = () => {
     const { t } = useTranslation();
     const [logs, setLogs] = useState<CallLogData[]>([]);
+    const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [period, setPeriod] = useState<CallLogsPeriod>('all');
+    const [customStartDate, setCustomStartDate] = useState('');
+    const [customEndDate, setCustomEndDate] = useState('');
+    const [segmentFilter, setSegmentFilter] = useState<SegmentFilter>('all');
+
+    const rangeReady =
+      period !== 'custom'
+      || (Boolean(customStartDate) && Boolean(customEndDate) && customStartDate <= customEndDate);
+
+    const query = useMemo(
+      () => buildPeriodQuery(period, customStartDate, customEndDate),
+      [period, customStartDate, customEndDate]
+    );
+
+    const periodLabel = PERIOD_OPTIONS.find((opt) => opt.value === period)?.label || 'selected range';
+
+    const segmentCounts = useMemo(() => {
+      const counts: Record<ParentSegment, number> = {
+        new_parent: 0,
+        current_family: 0,
+        unknown: 0,
+      };
+      for (const log of logs) {
+        const segment = (log.parentSegment || 'unknown') as ParentSegment;
+        counts[segment] = (counts[segment] || 0) + 1;
+      }
+      return counts;
+    }, [logs]);
+
+    const filteredLogs = useMemo(() => {
+      if (segmentFilter === 'all') return logs;
+      return logs.filter((log) => (log.parentSegment || 'unknown') === segmentFilter);
+    }, [logs, segmentFilter]);
+
+    const filteredTotal = filteredLogs.length;
+    const segmentLabel =
+      segmentFilter === 'all' ? 'All segments' : getSegmentLabel(segmentFilter);
 
     useEffect(() => {
-        const fetchLogs = async () => {
-            try {
-                const res = await api.get('/school/call-logs');
-                setLogs(res.data);
-            } catch (err) {
-                console.error('Failed to load call logs:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchLogs();
+      if (expandedId && !filteredLogs.some((log) => log.id === expandedId)) {
+        setExpandedId(null);
+      }
+    }, [expandedId, filteredLogs]);
+
+    const fetchLogs = useCallback(async (params: Record<string, string>, signal?: AbortSignal) => {
+      if (params.period === 'custom' && (!params.startDate || !params.endDate)) return;
+      try {
+        setLoading(true);
+        const res = await api.get('/school/call-logs', { params, signal });
+        const payload = res.data;
+        if (Array.isArray(payload)) {
+          setLogs(payload);
+          setTotal(payload.length);
+        } else {
+          setLogs(Array.isArray(payload?.logs) ? payload.logs : []);
+          setTotal(Number(payload?.total) || 0);
+        }
+      } catch (err) {
+        if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return;
+        console.error('Failed to load call logs:', err);
+        setLogs([]);
+        setTotal(0);
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
     }, []);
+
+    useEffect(() => {
+      if (!rangeReady) {
+        setLoading(false);
+        return;
+      }
+      const controller = new AbortController();
+      void fetchLogs(query, controller.signal);
+      return () => controller.abort();
+    }, [query, rangeReady, fetchLogs]);
 
     const toggleExpand = (id: string | null) => setExpandedId(expandedId === id ? null : id);
 
@@ -52,18 +199,9 @@ export const SchoolCallLogs = () => {
         return `${min}:${sec.toString().padStart(2, '0')}`;
     };
 
-    if (loading) {
-        return (
-            <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
-                <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
-                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{t('loading')}</p>
-            </div>
-        );
-    }
-
     return (
         <div className="max-w-6xl mx-auto py-6 px-4">
-            <div className="mb-8 flex flex-col sm:flex-row sm:items-baseline justify-between border-b border-slate-100 pb-6 gap-4">
+            <div className="mb-6 flex flex-col sm:flex-row sm:items-baseline justify-between border-b border-slate-100 pb-6 gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">{t('call_logs')}</h1>
                     <p className="text-slate-500 text-sm mt-1">{t('dashboard_desc')}</p>
@@ -74,8 +212,106 @@ export const SchoolCallLogs = () => {
                 </div>
             </div>
 
+            <div className="mb-5 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Call history range</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {loading
+                      ? 'Loading calls…'
+                      : segmentFilter === 'all'
+                        ? `${total} call${total === 1 ? '' : 's'} in ${periodLabel.toLowerCase()}`
+                        : `${filteredTotal} of ${total} · ${segmentLabel} · ${periodLabel.toLowerCase()}`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={period}
+                    onChange={(e) => setPeriod(e.target.value as CallLogsPeriod)}
+                    className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                  >
+                    {PERIOD_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  {period === 'custom' && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                      />
+                      <span className="text-xs text-slate-400 font-medium">to</span>
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setSegmentFilter('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
+                    segmentFilter === 'all'
+                      ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  All
+                  <span className="ml-1.5 tabular-nums opacity-80">{total}</span>
+                </button>
+                {SEGMENT_FILTERS.map((segment) => (
+                  <button
+                    key={segment}
+                    type="button"
+                    onClick={() => setSegmentFilter(segment)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${getSegmentFilterButtonClassName(segment, segmentFilter === segment)}`}
+                  >
+                    {getSegmentLabel(segment)}
+                    <span className="ml-1.5 tabular-nums opacity-80">{segmentCounts[segment]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {!rangeReady ? (
+              <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+                <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-slate-700">Choose a start and end date</p>
+                <p className="text-xs text-slate-400 mt-1">Pick a custom range to load older call history.</p>
+              </div>
+            ) : loading ? (
+              <div className="flex flex-col items-center justify-center h-[40vh] gap-3">
+                <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{t('loading')}</p>
+              </div>
+            ) : logs.length === 0 ? (
+              <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+                <Phone className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-slate-700">No calls in {periodLabel.toLowerCase()}</p>
+                <p className="text-xs text-slate-400 mt-1">Try a wider range to see older enrollment activity.</p>
+              </div>
+            ) : filteredLogs.length === 0 ? (
+              <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+                <Phone className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-slate-700">
+                  No {segmentLabel.toLowerCase()} calls in {periodLabel.toLowerCase()}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">Try another segment or a wider date range.</p>
+              </div>
+            ) : (
             <div className="space-y-4">
-                {logs.map((log) => (
+                {filteredLogs.map((log) => {
+                    const phone = String(log.participantId || '').replace(/^sip_/i, '');
+                    const showName = isUsableDisplayName(log.callerName);
+                    const badges = getDisplayTags(log);
+                    return (
                     <div key={log.id} className={`bg-white border rounded-2xl transition-all ${expandedId === log.id ? 'border-blue-500 shadow-xl' : 'border-slate-200 shadow-sm hover:border-slate-300'}`}>
                         <div className="px-4 sm:px-6 py-4 flex items-center justify-between cursor-pointer" onClick={() => toggleExpand(log.id)}>
                             <div className="flex items-center gap-3 sm:gap-5 min-w-0">
@@ -83,11 +319,23 @@ export const SchoolCallLogs = () => {
                                     <Phone className="w-5 h-5" />
                                 </div>
                                 <div className="flex flex-col min-w-0">
-                                    <span className="text-sm sm:text-base font-bold text-slate-900 truncate">{log.participantId.replace('sip_', '')}</span>
+                                    <span className="text-sm sm:text-base font-bold text-slate-900 truncate">
+                                      {showName ? log.callerName : phone}
+                                    </span>
                                     <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-0.5">
+                                        {showName && (
+                                          <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 truncate">
+                                            {phone}
+                                          </span>
+                                        )}
+                                        {log.callOrdinalLabel && (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap">
+                                            {log.callOrdinalLabel}
+                                          </span>
+                                        )}
                                         <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase whitespace-nowrap">
                                             <Calendar className="w-3 h-3" />
-                                            {new Date(log.createdAt).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric' })}
+                                            {new Date(log.createdAt).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' })}
                                         </span>
                                         <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase whitespace-nowrap">
                                             <Clock className="w-3 h-3" />
@@ -97,6 +345,18 @@ export const SchoolCallLogs = () => {
                                             {formatDuration(log.duration)}
                                         </span>
                                     </div>
+                                    {badges.length > 0 && (
+                                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                                        {badges.map((badge) => (
+                                          <span
+                                            key={`${log.id}-${badge.label}`}
+                                            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border ${badge.className}`}
+                                          >
+                                            {badge.label}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
                                 </div>
                             </div>
                             <ChevronDown className={`w-5 h-5 transition-transform duration-300 shrink-0 ${expandedId === log.id ? 'rotate-180 text-blue-600' : 'text-slate-300'}`} />
@@ -105,7 +365,6 @@ export const SchoolCallLogs = () => {
                         {expandedId === log.id && (
                             <div className="p-4 sm:p-6 pt-2 bg-slate-50/30 border-t border-slate-50 animate-in fade-in duration-200">
                                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-                                    {/* Summary & Audio */}
                                     <div className="xl:col-span-4 space-y-4">
                                         <SeekableAudioPlayer src={log.recordingUrl} />
                                         {log.summary && (
@@ -119,7 +378,6 @@ export const SchoolCallLogs = () => {
                                         )}
                                     </div>
 
-                                    {/* Complete Transcript */}
                                     <div className="xl:col-span-8 flex flex-col">
                                         <div className="flex items-center justify-between mb-3 px-1">
                                             <div className="flex items-center gap-2">
@@ -169,8 +427,10 @@ export const SchoolCallLogs = () => {
                             </div>
                         )}
                     </div>
-                ))}
+                    );
+                })}
             </div>
+            )}
         </div>
     );
 };

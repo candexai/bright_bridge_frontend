@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Activity, PhoneCall, Mic, TrendingUp, ArrowRight, Lightbulb } from 'lucide-react';
+import { Loader2, Activity, PhoneCall, Mic, TrendingUp, ArrowRight, Lightbulb, Search } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { MetricCard } from '../../components/MetricCard';
 import { Link } from 'react-router-dom';
@@ -18,30 +18,35 @@ import {
   TOUR_EMAIL_MISSING_LABEL,
 } from '../../utils/parentSegment';
 
+type RecentCall = {
+  id: string;
+  conversationId?: string | null;
+  callerName: string;
+  callerPhone: string;
+  callType: string;
+  duration: number;
+  timestamp: string;
+  recordingUrl: string | null;
+  summary?: string;
+  tourBookingDetected?: boolean;
+  tourBookingDate?: string | null;
+  tourEmailMissing?: boolean;
+  tags?: string[];
+  aiProcessed?: boolean;
+  parentSegment?: 'new_parent' | 'current_family' | 'unknown';
+  callOrdinal?: number;
+  callCountTotal?: number;
+  callOrdinalLabel?: string;
+};
+
 interface DashboardResponse {
   metrics: Array<{ label: string; value: number; change?: number; maxValue?: number }>;
   chartData: Array<{ name: string; calls: number; inquiries: number }>;
-  recentCalls: Array<{
-    id: string;
-    conversationId?: string | null;
-    callerName: string;
-    callerPhone: string;
-    callType: string;
-    duration: number;
-    timestamp: string;
-    recordingUrl: string | null;
-    summary?: string;
-    tourBookingDetected?: boolean;
-    tourBookingDate?: string | null;
-    tourEmailMissing?: boolean;
-    tags?: string[];
-    aiProcessed?: boolean;
-    parentSegment?: 'new_parent' | 'current_family' | 'unknown';
-  }>;
-
+  recentCalls?: RecentCall[];
 }
 
 type DashboardPeriod = '30d' | '15d' | '7d' | '1d' | 'custom';
+type RecentCallsPeriod = '7d' | '30d' | '60d' | '90d' | 'custom';
 
 const PERIOD_OPTIONS: Array<{ value: DashboardPeriod; label: string }> = [
   { value: '30d', label: 'Last 30 days' },
@@ -51,7 +56,19 @@ const PERIOD_OPTIONS: Array<{ value: DashboardPeriod; label: string }> = [
   { value: 'custom', label: 'Custom' },
 ];
 
-function buildDashboardQuery(period: DashboardPeriod, customStart: string, customEnd: string) {
+const RECENT_CALLS_PERIOD_OPTIONS: Array<{ value: RecentCallsPeriod; label: string }> = [
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: '60d', label: 'Last 60 days' },
+  { value: '90d', label: 'Last 90 days' },
+  { value: 'custom', label: 'Custom range' },
+];
+
+function buildPeriodQuery(
+  period: string,
+  customStart: string,
+  customEnd: string
+): Record<string, string> {
   const params: Record<string, string> = { period };
   if (period === 'custom' && customStart && customEnd) {
     params.startDate = customStart;
@@ -80,22 +97,36 @@ export const SchoolDashboard = () => {
   const [toursLoading, setToursLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [segmentFilter, setSegmentFilter] = useState<ParentSegment>('new_parent');
+  const [callerSearch, setCallerSearch] = useState('');
+
+  const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
+  const [recentCallsLoading, setRecentCallsLoading] = useState(true);
+  const [recentCallsPeriod, setRecentCallsPeriod] = useState<RecentCallsPeriod>('30d');
+  const [recentCallsStartDate, setRecentCallsStartDate] = useState('');
+  const [recentCallsEndDate, setRecentCallsEndDate] = useState('');
+  const [recentCallsTotal, setRecentCallsTotal] = useState(0);
 
   const customRangeReady = period !== 'custom' || (Boolean(customStartDate) && Boolean(customEndDate) && customStartDate <= customEndDate);
+  const recentCallsRangeReady =
+    recentCallsPeriod !== 'custom'
+    || (Boolean(recentCallsStartDate) && Boolean(recentCallsEndDate) && recentCallsStartDate <= recentCallsEndDate);
 
   const dashboardQuery = useMemo(
-    () => buildDashboardQuery(period, customStartDate, customEndDate),
+    () => buildPeriodQuery(period, customStartDate, customEndDate),
     [period, customStartDate, customEndDate]
+  );
+
+  const recentCallsQuery = useMemo(
+    () => buildPeriodQuery(recentCallsPeriod, recentCallsStartDate, recentCallsEndDate),
+    [recentCallsPeriod, recentCallsStartDate, recentCallsEndDate]
   );
 
   const fetchDashboard = React.useCallback(async (query: Record<string, string>, signal?: AbortSignal) => {
     if (query.period === 'custom' && (!query.startDate || !query.endDate)) {
       return;
     }
-    console.log(`[Dashboard] Fetching dashboard for period:`, query);
     try {
       const dashboardRes = await api.get('/school/dashboard', { params: query, signal });
-      console.log(`[Dashboard] Received data for period: ${dashboardRes.data.period}`, dashboardRes.data.metrics);
       setData(dashboardRes.data);
       setLastUpdated(new Date());
     } catch (err) {
@@ -104,6 +135,27 @@ export const SchoolDashboard = () => {
     } finally {
       if (!signal?.aborted) {
         setLoading(false);
+      }
+    }
+  }, []);
+
+  const fetchRecentCalls = React.useCallback(async (query: Record<string, string>, signal?: AbortSignal) => {
+    if (query.period === 'custom' && (!query.startDate || !query.endDate)) {
+      return;
+    }
+    try {
+      setRecentCallsLoading(true);
+      const res = await api.get('/school/recent-calls', { params: query, signal });
+      setRecentCalls(Array.isArray(res.data?.recentCalls) ? res.data.recentCalls : []);
+      setRecentCallsTotal(Number(res.data?.total) || 0);
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return;
+      console.error('Failed to load recent calls:', err);
+      setRecentCalls([]);
+      setRecentCallsTotal(0);
+    } finally {
+      if (!signal?.aborted) {
+        setRecentCallsLoading(false);
       }
     }
   }, []);
@@ -127,7 +179,6 @@ export const SchoolDashboard = () => {
       setLoading(false);
       return;
     }
-    console.log(`[Dashboard] useEffect triggered by period:`, dashboardQuery);
     const controller = new AbortController();
     setLoading(true);
     void fetchDashboard(dashboardQuery, controller.signal);
@@ -142,13 +193,27 @@ export const SchoolDashboard = () => {
     };
   }, [dashboardQuery, customRangeReady, fetchDashboard, fetchTourBookings]);
 
-
+  useEffect(() => {
+    if (!recentCallsRangeReady) {
+      setRecentCallsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    void fetchRecentCalls(recentCallsQuery, controller.signal);
+    const intervalId = setInterval(() => {
+      fetchRecentCalls(recentCallsQuery);
+    }, 30000);
+    return () => {
+      controller.abort();
+      clearInterval(intervalId);
+    };
+  }, [recentCallsQuery, recentCallsRangeReady, fetchRecentCalls]);
 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-[70vh] gap-3">
         <Loader2 className="w-8 h-8 text-primary-600 animate-spin" />
-        <p className="text-slate-500 text-sm">{t('loading')}</p>
+        <p className="text-sm text-slate-500">{t('loading')}</p>
       </div>
     );
   }
@@ -174,10 +239,44 @@ export const SchoolDashboard = () => {
     );
   }
 
-  const { metrics, chartData, recentCalls } = data;
-  const filteredRecentCalls = recentCalls.filter(
-    (call) => (call.parentSegment || 'new_parent') === segmentFilter
-  );
+  const { metrics, chartData } = data;
+  const normalizedCallerSearch = callerSearch.trim().toLowerCase();
+  const normalizedCallerSearchDigits = normalizedCallerSearch.replace(/\D/g, '');
+
+  const segmentCounts: Record<ParentSegment, number> = {
+    new_parent: 0,
+    current_family: 0,
+    unknown: 0,
+  };
+  for (const call of recentCalls) {
+    if (normalizedCallerSearch) {
+      const name = String(call.callerName || '').toLowerCase();
+      const phone = String(call.callerPhone || '');
+      const phoneDigits = phone.replace(/\D/g, '');
+      const matches =
+        name.includes(normalizedCallerSearch)
+        || phone.toLowerCase().includes(normalizedCallerSearch)
+        || (Boolean(normalizedCallerSearchDigits) && phoneDigits.includes(normalizedCallerSearchDigits));
+      if (!matches) continue;
+    }
+    const segment = (call.parentSegment || 'new_parent') as ParentSegment;
+    segmentCounts[segment] += 1;
+  }
+
+  const filteredRecentCalls = recentCalls.filter((call) => {
+    if ((call.parentSegment || 'new_parent') !== segmentFilter) return false;
+    if (!normalizedCallerSearch) return true;
+    const name = String(call.callerName || '').toLowerCase();
+    const phone = String(call.callerPhone || '');
+    const phoneDigits = phone.replace(/\D/g, '');
+    if (name.includes(normalizedCallerSearch)) return true;
+    if (phone.toLowerCase().includes(normalizedCallerSearch)) return true;
+    if (normalizedCallerSearchDigits && phoneDigits.includes(normalizedCallerSearchDigits)) return true;
+    return false;
+  });
+  const recentCallsPeriodLabel =
+    RECENT_CALLS_PERIOD_OPTIONS.find((opt) => opt.value === recentCallsPeriod)?.label
+    || 'selected range';
 
 
   return (
@@ -301,15 +400,65 @@ export const SchoolDashboard = () => {
 
 
 
-      <div className="space-y-8">
+      <div className="space-y-4">
+        {/* Recent Calls date range — independent of KPI period */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Call history range</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {recentCallsLoading
+                ? 'Loading calls…'
+                : `${recentCallsTotal} call${recentCallsTotal === 1 ? '' : 's'} in ${recentCallsPeriodLabel.toLowerCase()}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={recentCallsPeriod}
+              onChange={(e) => setRecentCallsPeriod(e.target.value as RecentCallsPeriod)}
+              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+            >
+              {RECENT_CALLS_PERIOD_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            {recentCallsPeriod === 'custom' && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="date"
+                  value={recentCallsStartDate}
+                  onChange={(e) => setRecentCallsStartDate(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                />
+                <span className="text-xs text-slate-400 font-medium">to</span>
+                <input
+                  type="date"
+                  value={recentCallsEndDate}
+                  onChange={(e) => setRecentCallsEndDate(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Recent Calls - Full Width */}
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-          <div className="px-6 py-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
-            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <div className="px-6 py-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-50/50">
+            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 shrink-0">
               <PhoneCall className="w-4 h-4 text-primary-600" />
               {t('recent_calls')}
             </h2>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap flex-1 lg:justify-end">
+              <div className="relative w-full sm:w-56 lg:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                <input
+                  type="search"
+                  value={callerSearch}
+                  onChange={(e) => setCallerSearch(e.target.value)}
+                  placeholder="Search name or number"
+                  className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-700 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                />
+              </div>
               {(['new_parent', 'current_family', 'unknown'] as ParentSegment[]).map((segment) => (
                 <button
                   key={segment}
@@ -318,6 +467,7 @@ export const SchoolDashboard = () => {
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${getSegmentFilterButtonClassName(segment, segmentFilter === segment)}`}
                 >
                   {getSegmentLabel(segment)}
+                  <span className="ml-1.5 tabular-nums opacity-80">{segmentCounts[segment]}</span>
                 </button>
               ))}
               <Link to="/school/call-logs" className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition-colors ml-1">
@@ -325,7 +475,18 @@ export const SchoolDashboard = () => {
               </Link>
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto relative min-h-[120px]">
+            {recentCallsLoading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/80 backdrop-blur-[1px]">
+                <Loader2 className="w-6 h-6 text-primary-600 animate-spin" />
+                <span className="text-xs text-slate-500 font-medium">Loading call history…</span>
+              </div>
+            )}
+            {!recentCallsRangeReady ? (
+              <div className="px-6 py-10 text-center text-sm text-slate-500">
+                Choose a start and end date to load calls.
+              </div>
+            ) : (
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="text-slate-500 text-[10px] font-bold uppercase tracking-wider border-b border-slate-100">
@@ -338,10 +499,12 @@ export const SchoolDashboard = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredRecentCalls.length === 0 ? (
+                {filteredRecentCalls.length === 0 && !recentCallsLoading ? (
                   <tr>
                     <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-500">
-                      No {getSegmentLabel(segmentFilter).toLowerCase()} calls in this period.
+                      {normalizedCallerSearch
+                        ? `No ${getSegmentLabel(segmentFilter).toLowerCase()} calls match “${callerSearch.trim()}”.`
+                        : `No ${getSegmentLabel(segmentFilter).toLowerCase()} calls in ${recentCallsPeriodLabel.toLowerCase()}.`}
                     </td>
                   </tr>
                 ) : filteredRecentCalls.map((call) => (
@@ -354,7 +517,7 @@ export const SchoolDashboard = () => {
                               {new Date(call.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </div>
                             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
-                              {new Date(call.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                              {new Date(call.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
                             </div>
                           </>
                         ) : (
@@ -364,6 +527,11 @@ export const SchoolDashboard = () => {
                       <td className="px-6 py-4">
                         <div className="text-sm font-bold text-slate-900 group-hover:text-blue-700 transition-colors">{call.callerName}</div>
                         <div className="text-xs text-slate-500 font-medium">{call.callerPhone}</div>
+                        {call.callOrdinalLabel && (
+                          <span className="inline-flex items-center mt-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            {call.callOrdinalLabel}
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -455,6 +623,7 @@ export const SchoolDashboard = () => {
                 ))}
               </tbody>
             </table>
+            )}
           </div>
         </div>
       </div>

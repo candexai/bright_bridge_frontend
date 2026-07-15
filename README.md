@@ -6,7 +6,7 @@ A production-ready SaaS dashboard application for childcare school enrollment ma
 
 # Tech Stack
 
-- **Vite** - Build tool and dev server
+- Vite** - Build tool and dev server
 - **React 19** - UI library
 - **TypeScript** - Type safety 
 - **React Router** - Client-side routing

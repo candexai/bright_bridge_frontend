@@ -370,7 +370,7 @@ export const SchoolDashboard = () => {
       </div>
 
       {/* Row 1: Top Metrics (Full Width) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-5 mb-10">
+      <div data-tour="dashboard-metrics" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-5 mb-10">
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} />
         ))}
@@ -412,7 +412,7 @@ export const SchoolDashboard = () => {
         </div>
 
         {/* Right: School Calendar (4 Columns) */}
-        <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm overflow-hidden min-h-[500px] relative">
+        <div data-tour="dashboard-calendar" className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm overflow-hidden min-h-[500px] relative">
           {toursLoading && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/80 backdrop-blur-[1px] rounded-2xl">
               <Loader2 className="w-7 h-7 text-primary-600 animate-spin" />
@@ -425,7 +425,7 @@ export const SchoolDashboard = () => {
 
 
 
-      <div className="space-y-4">
+      <div data-tour="dashboard-recent-calls" className="space-y-4">
         {/* Recent Calls date range — independent of KPI period */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
           <div>

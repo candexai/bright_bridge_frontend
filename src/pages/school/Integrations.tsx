@@ -63,6 +63,15 @@ export const SchoolIntegrations = () => {
       } else {
         const res = await api.post(`/school/integrations/${type}/connect`);
         if (res.data.authUrl) {
+          // Persist soft-gate step so the tour resumes after OAuth redirect
+          try {
+            await api.patch('/school/product-tour', {
+              status: 'in_progress',
+              currentStepId: 'integrations-connect',
+            });
+          } catch {
+            /* tour may already be completed */
+          }
           window.location.href = res.data.authUrl;
         } else {
           await fetchIntegrations();
@@ -125,7 +134,7 @@ export const SchoolIntegrations = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div data-tour="integrations-providers" className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {integrations.map((integration) => {
           const isGoogle = integration.type === 'google';
           return (
@@ -193,7 +202,7 @@ export const SchoolIntegrations = () => {
         )}
       </div>
 
-      <div className="mt-12 bg-white border border-slate-200 rounded-xl p-8 shadow-sm">
+      <div data-tour="integrations-prefs" className="mt-12 bg-white border border-slate-200 rounded-xl p-8 shadow-sm">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">

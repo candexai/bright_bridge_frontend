@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, type ChangeEvent } from 'reac
 import { useTranslation } from 'react-i18next';
 import { Save, Loader2, Phone, MessageSquare, CheckCircle, AlertCircle, Plus, Trash2, Activity, MapPin, Upload } from 'lucide-react';
 import api from '../../api/axios';
+import { markSettingsSavedForTour } from '../../tour/softGates';
 import * as XLSX from 'xlsx';
 
 interface QAPair {
@@ -109,6 +110,18 @@ export const SchoolSettings = () => {
       .finally(() => setLoading(false));
   }, []);
 
+  // Product tour may force AI Settings tab so anchors are visible
+  useEffect(() => {
+    const onForceTab = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail === 'agent' || detail === 'automation') {
+        setActiveTab(detail);
+      }
+    };
+    window.addEventListener('school-tour-force-settings-tab', onForceTab);
+    return () => window.removeEventListener('school-tour-force-settings-tab', onForceTab);
+  }, []);
+
   // ── Save all settings to DB ──────────────────────────────────────────────
   const saveSettings = useCallback(async () => {
     if (!settings) return;
@@ -153,6 +166,7 @@ export const SchoolSettings = () => {
       const savedAdminEmail = (res.data?.adminEmail || payload.adminEmail || '').trim();
       setSettings(prev => prev ? { ...prev, adminEmail: savedAdminEmail } : prev);
       setStatus({ type: 'success', message: `Settings saved — ${res.data.qaPairsCount ?? 0} Q&A pairs stored.` });
+      markSettingsSavedForTour();
     } catch (err: any) {
       console.error('[Settings] Save failed:', err);
       const msg = err?.response?.data?.error || 'Failed to save settings. Please try again.';
@@ -397,7 +411,7 @@ export const SchoolSettings = () => {
         {activeTab === 'agent' && (
           <>
             {/* Phone Routing */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6">
+            <div data-tour="settings-identity" className="bg-white border border-slate-200 rounded-xl p-6">
               <h2 className="text-base font-semibold text-slate-900 mb-4 flex items-center gap-2">
                 <Phone className="w-4 h-4 text-slate-400" />
                 School Identity & Routing
@@ -579,7 +593,7 @@ export const SchoolSettings = () => {
             </div>
 
             {/* Agent Configuration - MOVED UP */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <div data-tour="settings-transfer" className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
               <h2 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <Activity className="w-4 h-4 text-blue-600" />
                 Agent Voice & Behavior
@@ -641,7 +655,7 @@ export const SchoolSettings = () => {
             </div>
 
             {/* Q&A Knowledge Base - MOVED DOWN */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <div data-tour="settings-kb" className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
               <div className="flex items-center justify-between mb-1">
                 <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
                   <MessageSquare className="w-4 h-4 text-emerald-600" />
@@ -752,7 +766,7 @@ export const SchoolSettings = () => {
 
         {/* ── Automation tab ── */}
         {activeTab === 'automation' && (
-          <div className="bg-white border border-slate-200 rounded-xl p-6">
+          <div data-tour="settings-automation" className="bg-white border border-slate-200 rounded-xl p-6">
             <h2 className="text-base font-semibold text-slate-900 mb-1 flex items-center gap-2">
               <MessageSquare className="w-4 h-4 text-slate-400" />
               Automated Follow-ups
@@ -772,7 +786,7 @@ export const SchoolSettings = () => {
             </div>
 
             <div className="mb-6 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
+              <div data-tour="settings-admin-email">
                 <label className="block text-sm font-medium text-slate-700 mb-1">Admin Notification Email</label>
                 <input
                   type="email"

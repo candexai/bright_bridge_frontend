@@ -242,7 +242,7 @@ export const SchoolCallLogs = () => {
                 </div>
             </div>
 
-            <div className="mb-5 space-y-3">
+            <div data-tour="call-logs-filters" className="mb-5 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Call history range</p>
@@ -332,6 +332,7 @@ export const SchoolCallLogs = () => {
               )}
             </div>
 
+            <div data-tour="call-logs-list">
             {!rangeReady ? (
               <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
                 <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-3" />
@@ -504,6 +505,7 @@ export const SchoolCallLogs = () => {
                 })}
             </div>
             )}
+            </div>
         </div>
     );
 };

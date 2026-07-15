@@ -78,6 +78,19 @@ export const Sidebar = ({ role, isOpen, onClose }: SidebarProps) => {
                   key={item.path}
                   to={item.path}
                   onClick={() => onClose?.()}
+                  data-tour={
+                    item.path === '/school/integrations'
+                      ? 'nav-integrations'
+                      : item.path === '/school/settings'
+                        ? 'nav-settings'
+                        : item.path === '/school/call-logs'
+                          ? 'nav-call-logs'
+                          : item.path === '/school/daily-insights'
+                            ? 'nav-daily-insights'
+                            : item.path === '/school/dashboard'
+                              ? 'nav-dashboard'
+                              : undefined
+                  }
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive
                       ? 'bg-blue-50 text-blue-700'

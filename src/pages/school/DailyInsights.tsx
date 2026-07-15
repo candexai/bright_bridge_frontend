@@ -505,7 +505,7 @@ export const DailyInsights = () => {
       </div>
 
       {/* Top Row Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+      <div data-tour="insights-metrics" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
         {/* CALLS TODAY */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">CALLS TODAY</div>
@@ -552,7 +552,7 @@ export const DailyInsights = () => {
       {/* ── Main Content Grid ───────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Inquiries Needing Attention */}
-        <div className="lg:col-span-2">
+        <div data-tour="insights-queue" className="lg:col-span-2">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm mb-4 overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -602,7 +602,7 @@ export const DailyInsights = () => {
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div data-tour="insights-segments" className="flex flex-wrap items-center gap-2">
                 {(['new_parent', 'current_family', 'unknown'] as ParentSegment[]).map((segment) => {
                   const active = !phoneFilter && segmentFilter === segment && inquiryTab !== 'hot_leads';
                   return (
@@ -879,7 +879,7 @@ export const DailyInsights = () => {
         {/* Right Column: Tours/Actions */}
         <div className="lg:col-span-1 space-y-6">
           {/* Today's Tours Section */}
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div data-tour="insights-tours" className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
               <Calendar className="w-4 h-4 text-emerald-600" />
               <h3 className="text-sm font-bold text-slate-900">TODAY'S TOURS</h3>

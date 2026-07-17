@@ -140,36 +140,46 @@ export const SchoolDashboard = () => {
     }
   }, []);
 
-  const fetchRecentCalls = React.useCallback(async (query: Record<string, string>, signal?: AbortSignal) => {
+  const fetchRecentCalls = React.useCallback(async (
+    query: Record<string, string>,
+    signal?: AbortSignal,
+    opts?: { silent?: boolean }
+  ) => {
     if (query.period === 'custom' && (!query.startDate || !query.endDate)) {
       return;
     }
+    const silent = Boolean(opts?.silent);
     try {
-      setRecentCallsLoading(true);
+      // Only show the blur overlay on the first load / range change — not on 30s polls
+      if (!silent) setRecentCallsLoading(true);
       const res = await api.get('/school/recent-calls', { params: query, signal });
       setRecentCalls(Array.isArray(res.data?.recentCalls) ? res.data.recentCalls : []);
       setRecentCallsTotal(Number(res.data?.total) || 0);
     } catch (err) {
       if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return;
       console.error('Failed to load recent calls:', err);
-      setRecentCalls([]);
-      setRecentCallsTotal(0);
+      if (!silent) {
+        setRecentCalls([]);
+        setRecentCallsTotal(0);
+      }
     } finally {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && !silent) {
         setRecentCallsLoading(false);
       }
     }
   }, []);
 
-  const fetchTourBookings = React.useCallback(async (signal?: AbortSignal) => {
+  const fetchTourBookings = React.useCallback(async (signal?: AbortSignal, opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
     try {
+      if (!silent) setToursLoading(true);
       const toursRes = await api.get('/school/tour-bookings', { signal });
       setTourBookings(Array.isArray(toursRes.data) ? toursRes.data : []);
     } catch (err) {
       if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return;
-      setTourBookings([]);
+      if (!silent) setTourBookings([]);
     } finally {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && !silent) {
         setToursLoading(false);
       }
     }
@@ -185,8 +195,9 @@ export const SchoolDashboard = () => {
     void fetchDashboard(dashboardQuery, controller.signal);
     void fetchTourBookings(controller.signal);
     const intervalId = setInterval(() => {
+      // Background refresh — keep current UI visible while data updates
       fetchDashboard(dashboardQuery);
-      fetchTourBookings();
+      fetchTourBookings(undefined, { silent: true });
     }, 30000);
     return () => {
       controller.abort();
@@ -202,7 +213,7 @@ export const SchoolDashboard = () => {
     const controller = new AbortController();
     void fetchRecentCalls(recentCallsQuery, controller.signal);
     const intervalId = setInterval(() => {
-      fetchRecentCalls(recentCallsQuery);
+      fetchRecentCalls(recentCallsQuery, undefined, { silent: true });
     }, 30000);
     return () => {
       controller.abort();
@@ -519,7 +530,7 @@ export const SchoolDashboard = () => {
             </div>
           )}
           <div className="overflow-x-auto relative min-h-[120px]">
-            {recentCallsLoading && (
+            {recentCallsLoading && recentCalls.length === 0 && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/80 backdrop-blur-[1px]">
                 <Loader2 className="w-6 h-6 text-primary-600 animate-spin" />
                 <span className="text-xs text-slate-500 font-medium">Loading call history…</span>

@@ -1,4 +1,4 @@
-# Childcare Enrollment AI Frontend 
+          # Childcare Enrollment AI Frontend 
 
  
 A production-ready SaaS dashboard application for childcare school enrollment management with separate portals for schools and administrators.

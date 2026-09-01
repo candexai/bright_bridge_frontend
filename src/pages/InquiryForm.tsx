@@ -201,7 +201,7 @@ export const InquiryForm = () => {
           </form>
         </div>
         <p className="text-center text-slate-400 text-xs mt-6">
-          Powered by Childcare Enrollment Ai
+          Powered by BrightBridge
         </p>
       </div>
     </div>

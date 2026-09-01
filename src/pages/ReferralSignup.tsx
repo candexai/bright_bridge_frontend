@@ -97,7 +97,7 @@ export const ReferralSignup = () => {
           </p>
         </div>
         <h1 className="text-xl font-semibold text-slate-900 mb-1">Register your school</h1>
-        <p className="text-slate-500 text-sm mb-6">Sign up to get started with Childcare Enrollment Ai.</p>
+        <p className="text-slate-500 text-sm mb-6">Sign up to get started with BrightBridge.</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {submitError && (

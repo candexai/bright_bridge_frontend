@@ -8,12 +8,12 @@ interface AiNumberRequest {
     _id: string;
     name: string;
     email?: string;
-  };
+  } | null;
   requestedBy: {
     _id: string;
     name: string;
     email: string;
-  };
+  } | null;
   status: 'pending' | 'approved' | 'rejected' | 'completed';
   requestedAt: string;
   resolvedAt?: string;
@@ -142,8 +142,8 @@ const AiNumberRequests = () => {
                   <div className="flex items-center gap-2">
                     <School className="w-4 h-4 text-slate-400" />
                     <div>
-                      <p className="text-sm font-medium text-slate-900">{request.schoolId.name}</p>
-                      {request.schoolId.email && (
+                      <p className="text-sm font-medium text-slate-900">{request.schoolId?.name || 'Deleted school'}</p>
+                      {request.schoolId?.email && (
                         <p className="text-xs text-slate-500">{request.schoolId.email}</p>
                       )}
                     </div>
@@ -153,8 +153,10 @@ const AiNumberRequests = () => {
                   <div className="flex items-center gap-2">
                     <User className="w-4 h-4 text-slate-400" />
                     <div>
-                      <p className="text-sm font-medium text-slate-900">{request.requestedBy.name}</p>
-                      <p className="text-xs text-slate-500">{request.requestedBy.email}</p>
+                      <p className="text-sm font-medium text-slate-900">{request.requestedBy?.name || 'Deleted user'}</p>
+                      {request.requestedBy?.email && (
+                        <p className="text-xs text-slate-500">{request.requestedBy.email}</p>
+                      )}
                     </div>
                   </div>
                 </td>
